@@ -1,268 +1,346 @@
 import streamlit as st
 import datetime
 from datetime import timedelta
-import os
 import json
+import os
 from openai import OpenAI
 
 # ---------------------------------------------------------
-# 1. SETUP & CONFIGURATION
+# 1. PAGE SETUP
 # ---------------------------------------------------------
 st.set_page_config(
-    page_title="Unstuck - Adaptive Revision Planner",
+    page_title="Unstuck - Adaptive Revision",
     page_icon="⚡",
     layout="wide"
 )
 
-# Initialize OpenAI Client (Uses Streamlit Secrets or Environment Variable)
+# Safe OpenAI Client Setup (Uses Fallback Data if Key is Missing or Invalid)
 openai_api_key = st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY", ""))
-client = OpenAI(api_key=openai_api_key) if openai_api_key else None
+client = OpenAI(api_key=openai_api_key) if (openai_api_key and not openai_api_key.startswith("your-")) else None
 
 # ---------------------------------------------------------
-# 2. STATE MANAGEMENT (Mocking Supabase for Prototyping)
+# 2. SESSION STATE & USER ACCOUNTS
 # ---------------------------------------------------------
+if "user" not in st.session_state:
+    st.session_state.user = None
+
+if "user_settings" not in st.session_state:
+    st.session_state.user_settings = {
+        "level": "A-Level",
+        "weekly_hours": 15,
+        "subjects": {
+            "Chemistry": "AQA",
+            "Physics": "OCR A",
+            "Maths": "Edexcel"
+        }
+    }
+
+today = datetime.date.today()
+
+# Initial Demo Schedule Organized by Days
 if "tasks" not in st.session_state:
     st.session_state.tasks = [
         {
             "id": 1,
             "subject": "Chemistry",
+            "exam_board": "AQA",
             "topic": "Quantitative Chemistry & Moles",
-            "exam_date": datetime.date.today() + timedelta(days=14),
-            "confidence": "Low",
-            "status": "Overdue",
-            "scheduled_date": datetime.date.today() - timedelta(days=1),
-            "est_minutes": 60,
+            "scheduled_date": today - timedelta(days=2),
+            "est_minutes": 45,
+            "status": "Pending",
+            "confidence": 2,
+            "quiz_score": None
         },
         {
             "id": 2,
             "subject": "Physics",
+            "exam_board": "OCR A",
             "topic": "Electricity & Circuits",
-            "exam_date": datetime.date.today() + timedelta(days=20),
-            "confidence": "Medium",
-            "status": "Overdue",
-            "scheduled_date": datetime.date.today() - timedelta(days=2),
-            "est_minutes": 45,
+            "scheduled_date": today - timedelta(days=1),
+            "est_minutes": 40,
+            "status": "Pending",
+            "confidence": 3,
+            "quiz_score": None
         },
         {
             "id": 3,
-            "subject": "Biology",
-            "topic": "Cell Structure & Transport",
-            "exam_date": datetime.date.today() + timedelta(days=10),
-            "confidence": "Low",
-            "status": "Overdue",
-            "scheduled_date": datetime.date.today() - timedelta(days=3),
-            "est_minutes": 60,
+            "subject": "Maths",
+            "exam_board": "Edexcel",
+            "topic": "Calculus & Integration",
+            "scheduled_date": today - timedelta(days=1),
+            "est_minutes": 50,
+            "status": "Pending",
+            "confidence": 1,
+            "quiz_score": None
         },
         {
             "id": 4,
-            "subject": "Maths",
-            "topic": "Calculus & Integration",
-            "exam_date": datetime.date.today() + timedelta(days=5),
-            "confidence": "High",
-            "status": "Pending",
-            "scheduled_date": datetime.date.today(),
+            "subject": "Chemistry",
+            "exam_board": "AQA",
+            "topic": "Organic Reactions",
+            "scheduled_date": today,
             "est_minutes": 30,
+            "status": "Pending",
+            "confidence": 3,
+            "quiz_score": None
+        },
+        {
+            "id": 5,
+            "subject": "Physics",
+            "exam_board": "OCR A",
+            "topic": "Waves & Quantum Physics",
+            "scheduled_date": today + timedelta(days=1),
+            "est_minutes": 45,
+            "status": "Pending",
+            "confidence": 4,
+            "quiz_score": None
         }
     ]
 
-if "consecutive_misses" not in st.session_state:
-    st.session_state.consecutive_misses = 3  # Pre-set for demonstration
+if "selected_task_id" not in st.session_state:
+    st.session_state.selected_task_id = None
 
-if "recovery_mode" not in st.session_state:
-    st.session_state.recovery_mode = False
-
-if "selected_task" not in st.session_state:
-    st.session_state.selected_task = None
+if "recovery_triggered" not in st.session_state:
+    st.session_state.recovery_triggered = False
 
 # ---------------------------------------------------------
-# 3. HELPER FUNCTIONS & LOGIC
+# 3. FUNCTIONAL RECOVERY MODE (AUTOMATIC ON 3 MISSED TASKS)
 # ---------------------------------------------------------
-def activate_recovery_mode():
-    """Reduces the next 48 hours of workload by 30% and pushes dates."""
-    st.session_state.recovery_mode = True
-    today = datetime.date.today()
-    next_48h = today + timedelta(days=2)
+overdue_tasks = [t for t in st.session_state.tasks if t["scheduled_date"] < today and t["status"] == "Pending"]
+
+if len(overdue_tasks) >= 3 and not st.session_state.recovery_triggered:
+    st.session_state.recovery_triggered = True
+    for t in st.session_state.tasks:
+        if t["status"] == "Pending":
+            # Scale down remaining workload time by 30%
+            t["est_minutes"] = max(15, int(t["est_minutes"] * 0.7))
+            # Reschedule overdue tasks to today
+            if t["scheduled_date"] < today:
+                t["scheduled_date"] = today
+
+# ---------------------------------------------------------
+# 4. AI TASK BREAKDOWN GENERATOR (WITH SAFE FALLBACK)
+# ---------------------------------------------------------
+def fetch_ai_breakdown(topic, subject, board):
+    fallback_data = {
+        "steps": [
+            f"Review key specification definitions for {topic} ({board}) using summary notes.",
+            "Work through 2 step-by-step example calculations or diagrams to master the core method.",
+            "Complete 3 targeted practice problems without relying on notes or hints."
+        ],
+        "flashcards": [
+            {"q": f"What is the standard specification definition for {topic}?", "a": "The official exam board marking scheme definition."},
+            {"q": f"Which equation/formula is critical for {topic}?", "a": "Primary formula and required standard SI units."},
+            {"q": "What common mistake do students make in exam questions for this topic?", "a": "Incorrect unit conversions or missing working out steps."}
+        ],
+        "test_questions": [
+            {"q": f"Question 1: What is the fundamental principle of {topic}?", "options": ["Option A", "Option B", "Option C", "Option D"], "correct": 0},
+            {"q": f"Question 2: Which unit is correct for {topic} calculations?", "options": ["Joule", "Mole", "Pascal", "Volt"], "correct": 1},
+            {"q": f"Question 3: Calculate expected value under standard conditions.", "options": ["12.5", "25.0", "50.0", "100.0"], "correct": 1},
+            {"q": f"Question 4: Identify the essential step in multi-mark questions.", "options": ["Rearrange formula", "Ignore units", "Estimate value", "Skip state symbols"], "correct": 0},
+            {"q": f"Question 5: What occurs when variables double in this process?", "options": ["Halves", "Doubles", "Quadruples", "Remains constant"], "correct": 1}
+        ]
+    }
     
-    for task in st.session_state.tasks:
-        if task["scheduled_date"] <= next_48h and task["status"] != "Completed":
-            # Scale down estimated work time by 30%
-            task["est_minutes"] = int(task["est_minutes"] * 0.7)
-            # Push overdue items forward to today/tomorrow
-            if task["scheduled_date"] < today:
-                task["scheduled_date"] = today + timedelta(days=1)
-                task["status"] = "Pending"
-                
-    st.session_state.consecutive_misses = 0
-
-def generate_ai_breakdown(topic, subject):
-    """Calls OpenAI API to break a topic into micro-steps, flashcards, and practice questions."""
     if not client:
-        # Fallback Mock Data if no API key is set up yet
-        return {
-            "micro_steps": [
-                f"Read the summary notes for {topic} on Physics & Maths Tutor.",
-                "Define key formulas/terms and write them on a single index card.",
-                "Complete 3 foundation-level practice questions."
-            ],
-            "flashcards": [
-                {"q": f"What is the core definition in {topic}?", "a": "Standard exam board definition goes here."},
-                {"q": "What is the key equation?", "a": "Primary formula and units required."},
-                {"q": "What common mistake do students make?", "a": "Forgetting unit conversions."}
-            ],
-            "practice_questions": [
-                "Define the main term.",
-                "Calculate a standard problem given basic values.",
-                "Explain the mechanism/process in 3 steps.",
-                "Compare this process with a related topic.",
-                "Solve an extended multi-step exam question."
-            ]
-        }
-    
+        return fallback_data
+        
     prompt = f"""
-    You are an expert tutor for UK secondary students (GCSE/A-Level). 
-    Break down the revision topic '{topic}' in '{subject}' to help an overwhelmed student who is procrastinating.
-    
-    Return ONLY a valid JSON object matching this structure:
-    {{
-      "micro_steps": ["step 1", "step 2", "step 3"],
-      "flashcards": [
-        {{"q": "question 1", "a": "answer 1"}},
-        {{"q": "question 2", "a": "answer 2"}},
-        {{"q": "question 3", "a": "answer 3"}}
-      ],
-      "practice_questions": ["q1", "q2", "q3", "q4", "q5"]
-    }}
+    Generate a revision breakdown for {subject} ({board}) topic '{topic}'.
+    Return ONLY a JSON object with:
+    - "steps": 3 concise steps on the best way to learn this specific topic.
+    - "flashcards": array of 3 objects with "q" and "a".
+    - "test_questions": array of 5 objects with "q", "options" (4 strings), "correct" (index 0-3).
     """
-    
     try:
-        response = client.chat.completions.create(
+        res = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
             response_format={"type": "json_object"}
         )
-        return json.loads(response.choices[0].message.content)
-    except Exception as e:
-        st.error(f"Error calling OpenAI API: {e}")
-        return None
-
-# Check consecutive misses on initial load
-overdue_count = sum(1 for t in st.session_state.tasks if t["status"] == "Overdue")
-if overdue_count >= 3 and not st.session_state.recovery_mode:
-    st.session_state.consecutive_misses = overdue_count
+        return json.loads(res.choices[0].message.content)
+    except Exception:
+        return fallback_data
 
 # ---------------------------------------------------------
-# 4. UI HEADER & RECOVERY BANNER
+# 5. SIDEBAR: ACCOUNT & PERSONALISATION
+# ---------------------------------------------------------
+with st.sidebar:
+    st.header("👤 Account Sync")
+    if st.session_state.user:
+        st.success(f"Signed in as: **{st.session_state.user}**")
+        if st.button("Sign Out"):
+            st.session_state.user = None
+            st.rerun()
+    else:
+        with st.expander("Sign In / Register"):
+            email = st.text_input("Email", key="login_email")
+            pwd = st.text_input("Password", type="password", key="login_pwd")
+            if st.button("Sign In"):
+                if email:
+                    st.session_state.user = email
+                    st.success("Signed in! Progress synced.")
+                    st.rerun()
+
+    st.divider()
+    st.header("⚙️ Personalise Planner")
+    
+    level = st.selectbox("Level", ["A-Level", "GCSE"], index=0 if st.session_state.user_settings["level"] == "A-Level" else 1)
+    st.session_state.user_settings["level"] = level
+    
+    weekly_hrs = st.slider("Weekly Revision Target (Hours)", 5, 40, st.session_state.user_settings["weekly_hours"])
+    st.session_state.user_settings["weekly_hours"] = weekly_hrs
+    
+    st.subheader("Subjects & Exam Boards")
+    boards = ["AQA", "OCR A", "OCR B", "Edexcel", "WJEC"]
+    
+    chem_board = st.selectbox("Chemistry Board", boards, index=0)
+    phys_board = st.selectbox("Physics Board", boards, index=1)
+    math_board = st.selectbox("Maths Board", boards, index=3)
+    
+    st.session_state.user_settings["subjects"] = {
+        "Chemistry": chem_board,
+        "Physics": phys_board,
+        "Maths": math_board
+    }
+
+# ---------------------------------------------------------
+# 6. HEADER & AUTOMATIC RECOVERY BANNER
 # ---------------------------------------------------------
 st.title("⚡ Unstuck")
-st.caption("Adaptive Revision Planner • Beat Procrastination with Micro-Steps")
+st.caption("Adaptive Revision Planner • Beat Procrastination with Day-by-Day Micro-Steps")
 
-# Auto-Trigger Recovery Banner
-if st.session_state.consecutive_misses >= 3 or st.session_state.recovery_mode:
-    st.warning("⚠️ **Overwhelm Detected!** You have missed 3 or more tasks recently. Don't worry—revision plans should adapt to you, not the other way around.")
-    col_rec1, col_rec2 = st.columns([3, 1])
-    with col_rec1:
-        st.write("Activate **Recovery Mode** to cut your workload for the next 48 hours by 30% and reschedule overdue tasks automatically.")
-    with col_rec2:
-        if st.button("🛡️ Activate Recovery Mode", type="primary"):
-            activate_recovery_mode()
-            st.rerun()
+if st.session_state.recovery_triggered:
+    st.info("ℹ️ **Recovery Mode Activated:** You missed 3 tasks recently. Your workload for the next 48 hours has been reduced by 30% and schedule adjusted automatically.")
 
 st.divider()
 
 # ---------------------------------------------------------
-# 5. DASHBOARD LAYOUT (2 COLUMNS)
+# 7. MAIN LAYOUT (DAY-BY-DAY SCHEDULE & WORKSPACE)
 # ---------------------------------------------------------
-col_dash, col_workspace = st.columns([1, 1])
+col_schedule, col_workspace = st.columns([1.1, 0.9])
 
-# --- LEFT COLUMN: Schedule & Tasks ---
-with col_dash:
-    st.subheader("📋 Your Adaptive Schedule")
+with col_schedule:
+    st.subheader("📅 Your Schedule by Day")
     
-    # Quick Add Form
-    with st.expander("➕ Add New Topic / Subject"):
-        with st.form("new_task"):
-            new_sub = st.selectbox("Subject", ["Chemistry", "Physics", "Biology", "Maths", "English", "History"])
-            new_topic = st.text_input("Topic Name", placeholder="e.g. Quantitative Chemistry")
-            new_exam = st.date_input("Exam Date", datetime.date.today() + timedelta(days=30))
-            new_conf = st.select_slider("Current Confidence", options=["Low", "Medium", "High"])
-            submit = st.form_submit_button("Add to Schedule")
+    # Organize schedule into 5 daily tabs
+    days = [today + timedelta(days=i) for i in range(5)]
+    day_names = ["Today", "Tomorrow"] + [(today + timedelta(days=i)).strftime("%A (%b %d)") for i in range(2, 5)]
+    
+    tabs = st.tabs(day_names)
+    
+    for i, day in enumerate(days):
+        with tabs[i]:
+            day_tasks = [t for t in st.session_state.tasks if t["scheduled_date"] == day]
             
-            if submit and new_topic:
+            if not day_tasks:
+                st.caption("🎉 No tasks scheduled for this day.")
+            else:
+                for task in day_tasks:
+                    is_completed = task["status"] == "Completed"
+                    status_icon = "✅" if is_completed else ("🔴" if task["scheduled_date"] < today else "🔵")
+                    
+                    with st.container(border=True):
+                        c1, c2, c3 = st.columns([3, 2, 2])
+                        with c1:
+                            st.markdown(f"**{status_icon} {task['topic']}**")
+                            st.caption(f"{task['subject']} ({task['exam_board']}) • Conf: {task['confidence']}/5")
+                        with c2:
+                            st.caption(f"⏱️ {task['est_minutes']} mins")
+                            if task["quiz_score"] is not None:
+                                st.caption(f"📊 Test Score: {task['quiz_score']}/5")
+                        with c3:
+                            if not is_completed:
+                                if st.button("🚀 Unstuck", key=f"btn_unstuck_{task['id']}"):
+                                    st.session_state.selected_task_id = task["id"]
+                                    st.rerun()
+                            else:
+                                st.success("Completed")
+
+    # Add Task Option
+    with st.expander("➕ Add Task"):
+        with st.form("add_task_form"):
+            new_sub = st.selectbox("Subject", list(st.session_state.user_settings["subjects"].keys()))
+            new_top = st.text_input("Topic Name", placeholder="e.g. Redox Reactions")
+            new_date = st.date_input("Schedule Date", today)
+            new_mins = st.number_input("Expected Time (minutes)", value=30, step=5)
+            new_conf = st.slider("Current Confidence Rating (1-5)", 1, 5, 3)
+            
+            if st.form_submit_button("Add Task") and new_top:
+                new_id = max([t["id"] for t in st.session_state.tasks], default=0) + 1
                 st.session_state.tasks.append({
-                    "id": len(st.session_state.tasks) + 1,
+                    "id": new_id,
                     "subject": new_sub,
-                    "topic": new_topic,
-                    "exam_date": new_exam,
-                    "confidence": new_conf,
+                    "exam_board": st.session_state.user_settings["subjects"].get(new_sub, "AQA"),
+                    "topic": new_top,
+                    "scheduled_date": new_date,
+                    "est_minutes": new_mins,
                     "status": "Pending",
-                    "scheduled_date": datetime.date.today(),
-                    "est_minutes": 60 if new_conf == "Low" else 30
+                    "confidence": new_conf,
+                    "quiz_score": None
                 })
-                st.success(f"Added {new_topic}!")
+                st.success("Task added!")
                 st.rerun()
 
-    # Task List Display
-    st.write("### Tasks")
-    for task in st.session_state.tasks:
-        card_color = "🔴" if task["status"] == "Overdue" else ("🟢" if task["status"] == "Completed" else "🔵")
-        
-        with st.container(border=True):
-            tc1, tc2, tc3 = st.columns([3, 2, 2])
-            with tc1:
-                st.markdown(f"**{card_color} {task['topic']}**")
-                st.caption(f"{task['subject']} • Confidence: {task['confidence']}")
-            with tc2:
-                st.caption(f"⏱️ {task['est_minutes']} mins")
-                st.caption(f"📅 Due: {task['scheduled_date'].strftime('%b %d')}")
-            with tc3:
-                if st.button("🚀 Unstuck", key=f"btn_{task['id']}"):
-                    st.session_state.selected_task = task
-                    st.rerun()
-
-# --- RIGHT COLUMN: Micro-Task Workspace ---
+# --- RIGHT COLUMN: MICRO-TASK WORKSPACE ---
 with col_workspace:
     st.subheader("💡 Micro-Task Workspace")
     
-    task = st.session_state.selected_task
-    if not task:
-        st.info("👈 Select any task from your schedule and click **'Unstuck'** to generate a step-by-step micro-plan.")
+    current_task = next((t for t in st.session_state.tasks if t["id"] == st.session_state.selected_task_id), None)
+    
+    if not current_task:
+        st.info("👈 Select a day on the left schedule and click **'🚀 Unstuck'** on any task to open its learning plan.")
     else:
-        st.success(f"### Working on: {task['topic']}")
-        st.write(f"**Goal:** Complete 3 tiny actions to break through starting resistance.")
+        st.markdown(f"### Working on: **{current_task['topic']}**")
+        st.caption(f"**Subject:** {current_task['subject']} ({current_task['exam_board']}) | **Expected Time:** {current_task['est_minutes']} mins")
         
-        # Trigger OpenAI Generation
-        with st.spinner("AI is breaking down this topic into micro-steps..."):
-            breakdown = generate_ai_breakdown(task["topic"], task["subject"])
+        # Load topic content safely
+        content = fetch_ai_breakdown(current_task["topic"], current_task["subject"], current_task["exam_board"])
+        
+        st.divider()
+        st.write("#### 🎯 3 Best Learning Steps")
+        for idx, step in enumerate(content["steps"], 1):
+            st.checkbox(f"**Step {idx}:** {step}", key=f"chk_{current_task['id']}_{idx}")
             
-        if breakdown:
-            st.markdown("---")
-            st.write("#### 🎯 Step-by-Step Action Plan")
-            for i, step in enumerate(breakdown["micro_steps"], 1):
-                st.checkbox(f"**Step {i}:** {step}", key=f"step_{task['id']}_{i}")
+        st.divider()
+        st.write("#### 🧠 Quick Recall Flashcards")
+        for fc_idx, fc in enumerate(content["flashcards"], 1):
+            with st.expander(f"🎴 Flashcard {fc_idx}: {fc['q']}"):
+                st.write(f"**Answer:** {fc['a']}")
                 
-            st.markdown("---")
-            st.write("#### 🧠 Quick Recall Flashcards")
-            for card in breakdown["flashcards"]:
-                with st.expander(f"❓ {card['q']}"):
-                    st.write(f"Answer:")
-                    
-            st.markdown("---")
-            st.write("#### 📝 5 Optional Practice Questions")
-            for q in breakdown["practice_questions"]:
-                st.markdown(f"- {q}")
-                
-            st.markdown("---")
-            st.write("#### Finish Task & Rate Confidence")
-            conf_rating = st.select_slider(
-                "How do you feel after this revision session?",
-                options=["Low", "Medium", "High"],
-                value=task["confidence"],
-                key=f"post_conf_{task['id']}"
+        st.divider()
+        st.write("#### 📝 5 Exam Practice Questions")
+        quiz_answers = []
+        for q_idx, q in enumerate(content["test_questions"]):
+            st.write(f"**Q{q_idx+1}: {q['q']}**")
+            ans = st.radio(
+                f"Select answer for Q{q_idx+1}:", 
+                q["options"], 
+                key=f"quiz_{current_task['id']}_{q_idx}",
+                index=None
             )
+            quiz_answers.append((ans, q["options"][q["correct"]]))
             
-            if st.button("✅ Mark Task Complete", type="primary"):
-                task["status"] = "Completed"
-                task["confidence"] = conf_rating
-                st.session_state.selected_task = None
-                st.success("Great job! Schedule updated.")
-                st.rerun()
+        st.divider()
+        st.write("#### 📊 Confidence & Completion")
+        
+        # Confidence Rating (1-5 Scale)
+        new_conf_val = st.slider(
+            "Rate your confidence after this session (1 = Low, 5 = High):",
+            min_value=1,
+            max_value=5,
+            value=int(current_task["confidence"]),
+            key=f"conf_slider_{current_task['id']}"
+        )
+        
+        if st.button("✅ Complete Task", type="primary", key=f"complete_{current_task['id']}"):
+            score = sum(1 for user_ans, correct_ans in quiz_answers if user_ans == correct_ans)
+            
+            # Save updates to session state
+            current_task["status"] = "Completed"
+            current_task["confidence"] = new_conf_val
+            current_task["quiz_score"] = score
+            st.session_state.selected_task_id = None
+            
+            st.success(f"Task completed! Exam test score saved: {score}/5.")
+            st.rerun()
