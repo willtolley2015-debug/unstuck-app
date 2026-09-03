@@ -15,8 +15,9 @@ st.set_page_config(
 )
 
 # Safe OpenAI Client Setup
-openai_api_key = st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY", ""))
-client = OpenAI(api_key=openai_api_key) if (openai_api_key and not openai_api_key.startswith("your-") and len(openai_api_key) > 10) else None
+openai_api_key = st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY", "")).strip()
+has_valid_key = len(openai_api_key) > 10 and not openai_api_key.startswith("your-")
+client = OpenAI(api_key=openai_api_key) if has_valid_key else None
 
 # ---------------------------------------------------------
 # 2. SESSION STATE
@@ -48,7 +49,7 @@ if "tasks" not in st.session_state:
 # Backwards compatibility check
 for t in st.session_state.tasks:
     if "exam_board" not in t:
-        t["exam_board"] = st.session_state.user_settings["subject_boards"].get(t.get("subject", ""), "Standard")
+        t["exam_board"] = st.session_state.user_settings["subject_boards"].get(t.get("subject", ""), "AQA")
     if "confidence" not in t:
         t["confidence"] = 3
     if "quiz_score" not in t:
@@ -82,68 +83,94 @@ if len(overdue_tasks) >= 3 and not st.session_state.recovery_triggered:
                 t["exam_date"] = today
 
 # ---------------------------------------------------------
-# 4. EXAM-BOARD SPECIFIC AI GENERATOR
+# 4. EXAM-BOARD SPECIFIC AI GENERATOR (WITH DIAGNOSTICS)
 # ---------------------------------------------------------
-@st.cache_data(show_spinner=False)
 def fetch_ai_breakdown(topic, subject, board, level, spec_details=""):
-    """Generates rigorous, specification-aligned content using OpenAI."""
+    """Generates specification-aligned content using OpenAI with diagnostic error handling."""
     
-    # Notice banner if client is missing (lets user know why it's fallback)
-    fallback_data = {
-        "est_minutes": 35,
+    default_fallback = {
+        "est_minutes": 30,
         "steps": [
-            f"Review the official **{board} {level}** specification points for **{topic}** on **Physics & Maths Tutor (PMT)** or **Save My Exams**.",
-            f"Watch the **Cognito** or **Freesciencelessons** breakdown specifically addressing {topic}.",
-            f"Solve 3 official past paper questions from **PMT** for {topic} and verify using the mark scheme."
+            f"Review official {board} {level} specification points for {topic} on Physics & Maths Tutor (PMT) or Save My Exams.",
+            f"Watch Cognito or Freesciencelessons video breakdowns covering {topic}.",
+            f"Complete 3 exam-style questions on PMT for {topic} and check using official mark schemes."
         ],
         "flashcards": [
             {
-                "q": f"[API KEY MISSING] Add OPENAI_API_KEY in Streamlit Secrets to generate custom spec content for '{topic}'.",
-                "a": "Go to Streamlit Cloud -> Manage App -> Settings -> Secrets and paste your OpenAI API key."
+                "q": f"What is the key specification concept behind {topic} in {subject}?",
+                "a": f"In {board} {level} {subject}, {topic} requires applying standard definitions, maintaining unit consistency, and showing step-by-step working."
+            },
+            {
+                "q": f"Which core equation or principle applies to {topic}?",
+                "a": f"Recall the required spec formula for {topic}, ensuring standard SI units are used."
+            },
+            {
+                "q": f"Where do students commonly lose marks on {topic} exam questions?",
+                "a": "Forgetting unit conversions, misreading command words, or omitting intermediate calculation steps."
             }
         ],
         "test_questions": [
             {
-                "q": f"To unlock live AI questions for '{topic}', configure your OpenAI API Key.",
-                "options": ["API Key Not Configured", "API Key Configured", "Pending", "Error"],
+                "q": f"What is the first step when solving multi-mark questions on {topic} for {board}?",
+                "options": ["Convert all given values to standard SI units", "Skip Intermediate Steps", "Ignore unit labels", "Round intermediate figures"],
+                "correct": 0
+            },
+            {
+                "q": f"Which revision site hosts official {board} exam questions by topic for {topic}?",
+                "options": ["Physics & Maths Tutor (PMT)", "Generic Wiki", "Unverified Blog", "Social Media"],
+                "correct": 0
+            },
+            {
+                "q": f"What do mark schemes for {subject} high-tariff questions require for full credit?",
+                "options": ["Clear working steps and correct unit symbols", "Answer only without working", "Rounded guesses", "Missing formulas"],
+                "correct": 0
+            },
+            {
+                "q": f"Why is consulting the {board} specification essential for {topic}?",
+                "options": ["To identify exact mandatory key terms and required practical steps", "To skip exam practice", "To memorize non-examinable details", "To guess grade boundaries"],
+                "correct": 0
+            },
+            {
+                "q": f"What check should be performed on calculation answers for {topic}?",
+                "options": ["Verify significant figures, units, and logical magnitude", "Erase calculations", "Leave blank", "Ignore required units"],
                 "correct": 0
             }
         ]
     }
     
     if not client:
-        return fallback_data
+        return default_fallback
         
     prompt = f"""
     You are a senior UK chief examiner for {board} {level} {subject}.
-    Generate a precise, highly accurate, and rigorous learning package for the topic: '{topic}'.
-    Specification Context / Notes from student: '{spec_details if spec_details else "Standard syllabus requirements"}'
+    Generate a precise learning package for topic: '{topic}'.
+    Specification Context / Notes: '{spec_details if spec_details else "Standard syllabus requirements"}'
 
     CRITICAL REQUIREMENTS:
     1. Everything MUST strictly follow the official {board} {level} {subject} syllabus.
-    2. Flashcards must test exact definitions, formulas, required practicals, or core mechanisms. Answers MUST be 100% complete and factual (NO vague meta-statements or placeholders).
-    3. Test questions must mimic real {board} exam questions (including realistic distractors, unit conversions, or calculations where applicable).
+    2. Flashcards must test exact definitions, formulas, or core mechanisms. Answers MUST be 100% complete, factual, and detailed.
+    3. Practice questions must mimic real {board} exam questions with realistic answer options.
 
-    Return ONLY a JSON object formatted as follows:
+    Return ONLY a valid JSON object:
     {{
-      "est_minutes": integer (realistic target study time between 20 and 45 mins),
+      "est_minutes": integer (between 20 and 45),
       "steps": [
-        "Step 1 with specific resource recommendation (e.g. PMT, Cognito, Save My Exams, CGP, Seneca)",
+        "Step 1 with specific resource (e.g. PMT, Cognito, Save My Exams, CGP, Seneca)",
         "Step 2 focusing on active recall or formula practice",
         "Step 3 focusing on past-paper questions and mark scheme checking"
       ],
       "flashcards": [
-        {{"q": "Concrete question about {topic}", "a": "Full accurate factual answer according to {board} mark schemes"}},
+        {{"q": "Question 1 about {topic}", "a": "Complete mark-scheme factual answer"}},
         {{"q": "Question 2", "a": "Answer 2"}},
         {{"q": "Question 3", "a": "Answer 3"}}
       ],
       "test_questions": [
         {{
-          "q": "Exam-style question 1 for {topic}",
-          "options": ["Correct Answer", "Distractor 1", "Distractor 2", "Distractor 3"],
+          "q": "Exam-style question for {topic}",
+          "options": ["Option A", "Option B", "Option C", "Option D"],
           "correct": 0
         }},
-        ... 4 more objects (5 total questions)
+        ... 4 more objects (5 total)
       ]
     }}
     """
@@ -155,8 +182,9 @@ def fetch_ai_breakdown(topic, subject, board, level, spec_details=""):
             temperature=0.3
         )
         return json.loads(res.choices[0].message.content)
-    except Exception:
-        return fallback_data
+    except Exception as e:
+        st.error(f"⚠️ OpenAI API Error: {str(e)}")
+        return default_fallback
 
 # ---------------------------------------------------------
 # 5. SIDEBAR: ACCOUNT & PERSONALISATION
@@ -208,13 +236,13 @@ with st.sidebar:
         st.session_state.user_settings["subject_boards"][sub] = new_board
 
 # ---------------------------------------------------------
-# 6. HEADER & AUTOMATIC RECOVERY BANNER
+# 6. HEADER & RECOVERY BANNER
 # ---------------------------------------------------------
 st.title("⚡ Unstuck")
 st.caption("Adaptive Revision Planner • Beat Procrastination with Day-by-Day Micro-Steps")
 
 if not client:
-    st.warning("⚠️ **Live AI is offline:** Add your `OPENAI_API_KEY` into Streamlit Cloud Secrets to enable custom topic flashcards and exam questions.")
+    st.warning("⚠️ **OpenAI API Key Not Detected:** Add `OPENAI_API_KEY` into Streamlit Secrets to enable live AI task generation.")
 
 if st.session_state.recovery_triggered:
     st.info("ℹ️ **Recovery Mode Activated:** You had 3 or more overdue tasks. Workload times have been scaled back by 30% and schedule adjusted automatically.")
@@ -236,8 +264,7 @@ with col_schedule:
             new_sub = st.selectbox("Select Subject", chosen_subjects)
             new_top = st.text_input("Topic Name", placeholder="e.g. Titration Calculations / Newton's Second Law")
             
-            # Optional Spec Context for exact precision
-            new_spec = st.text_area("Specification Points / Sub-topics (Optional)", placeholder="e.g. AQA 3.1.2 Amount of substance, empirical formula, ideal gas equation pV=nRT", help="Paste exact spec codes or sub-topics to get higher quality flashcards and exam questions.")
+            new_spec = st.text_area("Specification Points / Sub-topics (Optional)", placeholder="e.g. AQA 3.1.2 Amount of substance, empirical formula, ideal gas equation pV=nRT")
             
             new_exam_date = st.date_input("Exam Date / Target Date", today)
             new_conf = st.slider("Current Confidence Rating (1-5)", 1, 5, 3)
@@ -248,7 +275,6 @@ with col_schedule:
                     curr_level = st.session_state.user_settings["level"]
                     new_id = max([t.get("id", 0) for t in st.session_state.tasks], default=0) + 1
                     
-                    # AI estimates time and validates content
                     content_preview = fetch_ai_breakdown(new_top.strip(), new_sub, assigned_board, curr_level, new_spec.strip())
                     est_time = content_preview.get("est_minutes", 30)
                     
