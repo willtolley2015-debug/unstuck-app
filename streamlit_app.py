@@ -16,10 +16,10 @@ st.set_page_config(
 
 # Safe OpenAI Client Setup
 openai_api_key = st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY", ""))
-client = OpenAI(api_key=openai_api_key) if (openai_api_key and not openai_api_key.startswith("your-")) else None
+client = OpenAI(api_key=openai_api_key) if (openai_api_key and not openai_api_key.startswith("your-") and len(openai_api_key) > 10) else None
 
 # ---------------------------------------------------------
-# 2. SESSION STATE & DEFENSIVE KEYS
+# 2. SESSION STATE
 # ---------------------------------------------------------
 if "user" not in st.session_state:
     st.session_state.user = None
@@ -45,7 +45,7 @@ today = datetime.date.today()
 if "tasks" not in st.session_state:
     st.session_state.tasks = []
 
-# Ensure backwards compatibility for session state keys
+# Backwards compatibility check
 for t in st.session_state.tasks:
     if "exam_board" not in t:
         t["exam_board"] = st.session_state.user_settings["subject_boards"].get(t.get("subject", ""), "Standard")
@@ -59,6 +59,8 @@ for t in st.session_state.tasks:
         t["est_minutes"] = 30
     if "exam_date" not in t:
         t["exam_date"] = t.get("scheduled_date", today)
+    if "spec_details" not in t:
+        t["spec_details"] = ""
 
 if "selected_task_id" not in st.session_state:
     st.session_state.selected_task_id = None
@@ -67,7 +69,7 @@ if "recovery_triggered" not in st.session_state:
     st.session_state.recovery_triggered = False
 
 # ---------------------------------------------------------
-# 3. AUTOMATIC RECOVERY MODE (3 OVERDUE TASKS)
+# 3. RECOVERY MODE (3 OVERDUE TASKS)
 # ---------------------------------------------------------
 overdue_tasks = [t for t in st.session_state.tasks if t.get("exam_date", today) < today and t.get("status") == "Pending"]
 
@@ -80,58 +82,30 @@ if len(overdue_tasks) >= 3 and not st.session_state.recovery_triggered:
                 t["exam_date"] = today
 
 # ---------------------------------------------------------
-# 4. TOPIC-SPECIFIC AI GENERATOR (WITH DETAILED FALLBACKS)
+# 4. EXAM-BOARD SPECIFIC AI GENERATOR
 # ---------------------------------------------------------
 @st.cache_data(show_spinner=False)
-def fetch_ai_breakdown(topic, subject, board):
-    """Generates specific micro-steps, real flashcard answers, and exam questions tailored to the topic."""
+def fetch_ai_breakdown(topic, subject, board, level, spec_details=""):
+    """Generates rigorous, specification-aligned content using OpenAI."""
     
-    # Smart, realistic fallback if OpenAI key is missing or fails
+    # Notice banner if client is missing (lets user know why it's fallback)
     fallback_data = {
         "est_minutes": 35,
         "steps": [
-            f"Watch the concept breakdown video on **Cognito** or **Save My Exams** for {topic} to understand the core mechanism.",
-            f"Download the official {board} specification notes and flashcards on **Physics & Maths Tutor (PMT)** or **CGP** for {topic}.",
-            f"Work through 3 past-paper exam questions on **PMT** for {topic} and mark them using the official mark scheme."
+            f"Review the official **{board} {level}** specification points for **{topic}** on **Physics & Maths Tutor (PMT)** or **Save My Exams**.",
+            f"Watch the **Cognito** or **Freesciencelessons** breakdown specifically addressing {topic}.",
+            f"Solve 3 official past paper questions from **PMT** for {topic} and verify using the mark scheme."
         ],
         "flashcards": [
             {
-                "q": f"What is the key core principle underlying {topic} in {subject}?",
-                "a": f"In {subject} ({board}), {topic} requires applying standard spec definitions, maintaining unit consistency, and showing clear step-by-step working."
-            },
-            {
-                "q": f"What equation or key term must be remembered for {topic}?",
-                "a": f"State the main equation/definition required for {topic}, ensuring standard SI units are applied."
-            },
-            {
-                "q": f"What is a common trap students lose marks on in {board} exam questions for {topic}?",
-                "a": "Forgetting to convert units before calculating, missing key command words (e.g., 'explain' vs 'describe'), or omitting final unit labels."
+                "q": f"[API KEY MISSING] Add OPENAI_API_KEY in Streamlit Secrets to generate custom spec content for '{topic}'.",
+                "a": "Go to Streamlit Cloud -> Manage App -> Settings -> Secrets and paste your OpenAI API key."
             }
         ],
         "test_questions": [
             {
-                "q": f"Which approach is required when solving a multi-step calculation on {topic} for {board}?",
-                "options": ["Convert all values to standard units first", "Skip writing down intermediate equations", "Ignore state symbols", "Round numbers before final calculation"],
-                "correct": 0
-            },
-            {
-                "q": f"When revising {topic}, what is the main purpose of consulting the {board} specification?",
-                "options": ["To check exact key terms and required practical steps", "To memorize non-examinable facts", "To avoid past papers", "To estimate exam grade boundaries"],
-                "correct": 0
-            },
-            {
-                "q": f"In {subject}, how does doubling the primary input parameter usually affect the outcome in {topic}?",
-                "options": ["It changes according to the explicit formula relationships", "It always doubles the value", "It always quadruples the value", "It has zero effect"],
-                "correct": 0
-            },
-            {
-                "q": f"Which resource provides recommended exam-board specific topic notes for {topic}?",
-                "options": ["Physics & Maths Tutor (PMT)", "Generic dictionary", "Random forum posts", "Unverified blog notes"],
-                "correct": 0
-            },
-            {
-                "q": f"What is the final step before submitting a response to a high-tariff question on {topic}?",
-                "options": ["Verify units, significant figures, and command words", "Erase working out", "Re-write question text", "Leave answer blank"],
+                "q": f"To unlock live AI questions for '{topic}', configure your OpenAI API Key.",
+                "options": ["API Key Not Configured", "API Key Configured", "Pending", "Error"],
                 "correct": 0
             }
         ]
@@ -141,20 +115,44 @@ def fetch_ai_breakdown(topic, subject, board):
         return fallback_data
         
     prompt = f"""
-    You are an expert UK school tutor specializing in {board} {subject}.
-    Generate a precise, topic-specific revision package for the topic: '{topic}'.
-    
-    Return ONLY a JSON object with:
-    - "est_minutes": integer (estimated revision time between 20 and 50 based on topic complexity).
-    - "steps": array of 3 specific, actionable steps tailored to '{topic}'. Explicitly recommend specific top UK resources like Physics & Maths Tutor (PMT), Cognito, Save My Exams, Seneca, or CGP revision guides.
-    - "flashcards": array of 3 concrete flashcards with actual factual questions ("q") and direct, complete factual answers ("a") specifically about '{topic}' (NO placeholders or vague meta-text).
-    - "test_questions": array of 5 genuine multiple-choice practice questions specifically testing knowledge of '{topic}'. Each object has "q", "options" (4 distinct real answer choices), and "correct" (0-3 index).
+    You are a senior UK chief examiner for {board} {level} {subject}.
+    Generate a precise, highly accurate, and rigorous learning package for the topic: '{topic}'.
+    Specification Context / Notes from student: '{spec_details if spec_details else "Standard syllabus requirements"}'
+
+    CRITICAL REQUIREMENTS:
+    1. Everything MUST strictly follow the official {board} {level} {subject} syllabus.
+    2. Flashcards must test exact definitions, formulas, required practicals, or core mechanisms. Answers MUST be 100% complete and factual (NO vague meta-statements or placeholders).
+    3. Test questions must mimic real {board} exam questions (including realistic distractors, unit conversions, or calculations where applicable).
+
+    Return ONLY a JSON object formatted as follows:
+    {{
+      "est_minutes": integer (realistic target study time between 20 and 45 mins),
+      "steps": [
+        "Step 1 with specific resource recommendation (e.g. PMT, Cognito, Save My Exams, CGP, Seneca)",
+        "Step 2 focusing on active recall or formula practice",
+        "Step 3 focusing on past-paper questions and mark scheme checking"
+      ],
+      "flashcards": [
+        {{"q": "Concrete question about {topic}", "a": "Full accurate factual answer according to {board} mark schemes"}},
+        {{"q": "Question 2", "a": "Answer 2"}},
+        {{"q": "Question 3", "a": "Answer 3"}}
+      ],
+      "test_questions": [
+        {{
+          "q": "Exam-style question 1 for {topic}",
+          "options": ["Correct Answer", "Distractor 1", "Distractor 2", "Distractor 3"],
+          "correct": 0
+        }},
+        ... 4 more objects (5 total questions)
+      ]
+    }}
     """
     try:
         res = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
-            response_format={"type": "json_object"}
+            response_format={"type": "json_object"},
+            temperature=0.3
         )
         return json.loads(res.choices[0].message.content)
     except Exception:
@@ -186,7 +184,6 @@ with st.sidebar:
     level = st.selectbox("Level", ["A-Level", "GCSE"], index=1 if st.session_state.user_settings["level"] == "GCSE" else 0)
     st.session_state.user_settings["level"] = level
     
-    # Up to 50 hours per week
     weekly_hrs = st.slider("Weekly Revision Target (Hours)", 5, 50, st.session_state.user_settings.get("weekly_hours", 20))
     st.session_state.user_settings["weekly_hours"] = weekly_hrs
     
@@ -216,37 +213,43 @@ with st.sidebar:
 st.title("⚡ Unstuck")
 st.caption("Adaptive Revision Planner • Beat Procrastination with Day-by-Day Micro-Steps")
 
+if not client:
+    st.warning("⚠️ **Live AI is offline:** Add your `OPENAI_API_KEY` into Streamlit Cloud Secrets to enable custom topic flashcards and exam questions.")
+
 if st.session_state.recovery_triggered:
     st.info("ℹ️ **Recovery Mode Activated:** You had 3 or more overdue tasks. Workload times have been scaled back by 30% and schedule adjusted automatically.")
 
 st.divider()
 
 # ---------------------------------------------------------
-# 7. MAIN SCHEDULE & MICRO-TASK WORKSPACE
+# 7. MAIN SCHEDULE & WORKSPACE
 # ---------------------------------------------------------
 col_schedule, col_workspace = st.columns([1.1, 0.9])
 
 with col_schedule:
     st.subheader("📅 Your Schedule by Date")
     
-    # Task Creator Form (AI estimates expected time; Date labeled 'Exam Date')
+    # Task Creator Form
     with st.expander("➕ Add Task to Schedule", expanded=(len(st.session_state.tasks) == 0)):
         with st.form("add_task_form"):
             chosen_subjects = st.session_state.user_settings["selected_subjects"]
             new_sub = st.selectbox("Select Subject", chosen_subjects)
-            new_top = st.text_input("Topic Name", placeholder="e.g. Titration Calculations / Newton's Laws")
+            new_top = st.text_input("Topic Name", placeholder="e.g. Titration Calculations / Newton's Second Law")
             
-            # Exam Date Selection (No Expected Time input required)
+            # Optional Spec Context for exact precision
+            new_spec = st.text_area("Specification Points / Sub-topics (Optional)", placeholder="e.g. AQA 3.1.2 Amount of substance, empirical formula, ideal gas equation pV=nRT", help="Paste exact spec codes or sub-topics to get higher quality flashcards and exam questions.")
+            
             new_exam_date = st.date_input("Exam Date / Target Date", today)
             new_conf = st.slider("Current Confidence Rating (1-5)", 1, 5, 3)
             
             if st.form_submit_button("➕ Add Task to Schedule"):
                 if new_top.strip():
                     assigned_board = st.session_state.user_settings["subject_boards"].get(new_sub, "AQA")
+                    curr_level = st.session_state.user_settings["level"]
                     new_id = max([t.get("id", 0) for t in st.session_state.tasks], default=0) + 1
                     
-                    # Fetch AI content to get dynamic expected time
-                    content_preview = fetch_ai_breakdown(new_top.strip(), new_sub, assigned_board)
+                    # AI estimates time and validates content
+                    content_preview = fetch_ai_breakdown(new_top.strip(), new_sub, assigned_board, curr_level, new_spec.strip())
                     est_time = content_preview.get("est_minutes", 30)
                     
                     st.session_state.tasks.append({
@@ -254,13 +257,14 @@ with col_schedule:
                         "subject": new_sub,
                         "exam_board": assigned_board,
                         "topic": new_top.strip(),
+                        "spec_details": new_spec.strip(),
                         "exam_date": new_exam_date,
                         "est_minutes": est_time,
                         "status": "Pending",
                         "confidence": new_conf,
                         "quiz_score": None
                     })
-                    st.success(f"Added '{new_top}'! AI estimated time: {est_time} mins.")
+                    st.success(f"Added '{new_top}'! Target time: {est_time} mins.")
                     st.rerun()
                 else:
                     st.error("Please enter a topic name.")
@@ -291,7 +295,7 @@ with col_schedule:
                             conf_text = task.get('confidence', 3)
                             st.caption(f"{sub_text} ({board_text}) • Conf: {conf_text}/5")
                         with c2:
-                            st.caption(f"⏱️ {task.get('est_minutes', 30)} mins (AI Est.)")
+                            st.caption(f"⏱️ {task.get('est_minutes', 30)} mins")
                             if task.get("quiz_score") is not None:
                                 st.caption(f"📊 Test Score: {task.get('quiz_score')}/5")
                         with c3:
@@ -312,14 +316,18 @@ with col_workspace:
         st.info("👈 Select a date tab on the schedule and click **'🚀 Unstuck'** on any task to open its revision plan.")
     else:
         st.markdown(f"### Working on: **{current_task.get('topic')}**")
-        st.caption(f"**Subject:** {current_task.get('subject')} ({current_task.get('exam_board')}) | **AI Estimated Time:** {current_task.get('est_minutes')} mins | **Exam Date:** {current_task.get('exam_date').strftime('%b %d, %Y') if isinstance(current_task.get('exam_date'), (datetime.date, datetime.datetime)) else current_task.get('exam_date')}")
+        st.caption(f"**Subject:** {current_task.get('subject')} ({current_task.get('exam_board')}) | **Est. Time:** {current_task.get('est_minutes')} mins | **Level:** {st.session_state.user_settings['level']}")
+        if current_task.get("spec_details"):
+            st.caption(f"**Spec Focus:** {current_task.get('spec_details')}")
         
         # Load topic-specific AI content
-        content = fetch_ai_breakdown(current_task.get('topic'), current_task.get('subject'), current_task.get('exam_board'))
-        
-        # Sync estimated minutes if AI updated it
-        if "est_minutes" in content:
-            current_task["est_minutes"] = content["est_minutes"]
+        content = fetch_ai_breakdown(
+            current_task.get('topic'),
+            current_task.get('subject'),
+            current_task.get('exam_board'),
+            st.session_state.user_settings['level'],
+            current_task.get('spec_details', '')
+        )
         
         st.divider()
         st.write("#### 🎯 3 Best Learning Steps & Recommended Resources")
