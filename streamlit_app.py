@@ -46,7 +46,7 @@ today = datetime.date.today()
 if "tasks" not in st.session_state:
     st.session_state.tasks = []
 
-# Backwards compatibility check
+# Backwards compatibility check & state initialization
 for t in st.session_state.tasks:
     if "exam_board" not in t:
         t["exam_board"] = st.session_state.user_settings["subject_boards"].get(t.get("subject", ""), "AQA")
@@ -145,18 +145,23 @@ def fetch_ai_breakdown(topic, subject, board, level, spec_details=""):
         
     prompt = f"""
     You are a senior UK chief examiner for {board} {level} {subject}.
-    Generate a precise learning package for topic: '{topic}'.
+    Analyze the topic '{topic}' and generate a specification-aligned study module.
     Specification Context / Notes: '{spec_details if spec_details else "Standard syllabus requirements"}'
+
+    ESTIMATED TIME RULES ('est_minutes'):
+    - Evaluate topic breadth, equation density, and cognitive load carefully. DO NOT default to 30 or 45.
+    - Quick definitions, single concepts, or basic terms = 15 to 20 minutes.
+    - Standard topics with multiple sub-concepts or single equations = 25 to 35 minutes.
+    - Heavy topics (multi-step calculations, synoptic themes, required practicals, extended essays) = 40 to 60 minutes.
 
     CRITICAL REQUIREMENTS:
     1. Everything MUST strictly follow the official {board} {level} {subject} syllabus.
-    2. Realistically estimate the required revision time in minutes ('est_minutes') based on topic complexity and depth (between 15 and 60 minutes). E.g., quick definitions = 15-20 mins, heavy calculation/essay topics = 35-60 mins.
-    3. Flashcards must test exact definitions, formulas, or core mechanisms. Answers MUST be 100% complete, factual, and detailed.
-    4. Practice questions must mimic real {board} exam questions with realistic answer options.
+    2. Flashcards must test exact definitions, formulas, or core mechanisms. Answers MUST be 100% complete, factual, and detailed.
+    3. Practice questions must mimic real {board} exam questions with realistic answer options.
 
     Return ONLY a valid JSON object:
     {{
-      "est_minutes": integer (realistic dynamic value between 15 and 60 based on complexity),
+      "est_minutes": integer (calculated based on complexity rules above, between 15 and 60),
       "steps": [
         "Step 1 with specific resource (e.g. PMT, Cognito, Save My Exams, CGP, Seneca)",
         "Step 2 focusing on active recall or formula practice",
@@ -197,19 +202,16 @@ def calculate_optimal_scheduled_date(target_exam_date):
     if target_exam_date <= today:
         return today
         
-    # Schedule across days starting today up to the day before the exam (or up to target date if exam is tomorrow)
     last_study_day = max(today, target_exam_date - timedelta(days=1))
     num_days = (last_study_day - today).days + 1
     candidate_days = [today + timedelta(days=i) for i in range(num_days)]
     
-    # Calculate current total scheduled minutes per day
     day_workloads = {d: 0 for d in candidate_days}
     for t in st.session_state.tasks:
         d = t.get("exam_date")
         if d in day_workloads and t.get("status") != "Completed":
             day_workloads[d] += t.get("est_minutes", 30)
             
-    # Pick the day in the lead-up window with the lowest total workload
     best_day = min(candidate_days, key=lambda d: day_workloads[d])
     return best_day
 
@@ -354,11 +356,11 @@ with col_schedule:
                     curr_level = st.session_state.user_settings["level"]
                     new_id = max([t.get("id", 0) for t in st.session_state.tasks], default=0) + 1
                     
-                    # AI estimates realistic study duration based on topic complexity
-                    content_preview = fetch_ai_breakdown(new_top.strip(), new_sub, assigned_board, curr_level, new_spec.strip())
-                    est_time = content_preview.get("est_minutes", 30)
+                    # Fetch AI content ONCE at creation time and save inside task dictionary
+                    with st.spinner("Analyzing topic depth and generating exam content..."):
+                        content_preview = fetch_ai_breakdown(new_top.strip(), new_sub, assigned_board, curr_level, new_spec.strip())
                     
-                    # Intelligently assign optimal revision date leading up to the target exam
+                    est_time = content_preview.get("est_minutes", 30)
                     optimal_rev_date = calculate_optimal_scheduled_date(new_exam_date)
                     
                     st.session_state.tasks.append({
@@ -367,14 +369,15 @@ with col_schedule:
                         "exam_board": assigned_board,
                         "topic": new_top.strip(),
                         "spec_details": new_spec.strip(),
-                        "exam_date": optimal_rev_date,          # Assigned revision day
-                        "target_exam_date": new_exam_date,      # Date of actual exam
+                        "exam_date": optimal_rev_date,          
+                        "target_exam_date": new_exam_date,      
                         "est_minutes": est_time,
+                        "ai_content": content_preview,          # Frozen AI content cached in session state
                         "status": "Pending",
                         "confidence": new_conf,
                         "quiz_score": None
                     })
-                    st.success(f"Added '{new_top}'! Scheduled for {optimal_rev_date.strftime('%a %b %d')} (AI Est: {est_time} mins).")
+                    st.success(f"Added '{new_top}'! Scheduled for {optimal_rev_date.strftime('%a %b %d')} (AI Estimated: {est_time} mins).")
                     st.rerun()
                 else:
                     st.error("Please enter a topic name.")
@@ -431,14 +434,19 @@ with col_workspace:
         if current_task.get("spec_details"):
             st.caption(f"**Spec Focus:** {current_task.get('spec_details')}")
         
-        # Load topic-specific AI content
-        content = fetch_ai_breakdown(
-            current_task.get('topic'),
-            current_task.get('subject'),
-            current_task.get('exam_board'),
-            st.session_state.user_settings['level'],
-            current_task.get('spec_details', '')
-        )
+        # Load or lazily initialize frozen AI content stored in session state
+        if "ai_content" not in current_task or not current_task["ai_content"]:
+            with st.spinner("Generating examiner-aligned breakdown..."):
+                current_task["ai_content"] = fetch_ai_breakdown(
+                    current_task.get('topic'),
+                    current_task.get('subject'),
+                    current_task.get('exam_board'),
+                    st.session_state.user_settings['level'],
+                    current_task.get('spec_details', '')
+                )
+                current_task["est_minutes"] = current_task["ai_content"].get("est_minutes", 30)
+
+        content = current_task["ai_content"]
         
         st.divider()
         st.write("#### 🎯 3 Best Learning Steps & Recommended Resources")
@@ -453,17 +461,17 @@ with col_workspace:
                 
         st.divider()
         st.write("#### 📝 5 Exam Practice Questions")
-        quiz_answers = []
-        for q_idx, q in enumerate(content.get("test_questions", [])):
+        
+        test_q_list = content.get("test_questions", [])
+        for q_idx, q in enumerate(test_q_list):
             st.write(f"**Q{q_idx+1}: {q.get('q')}**")
-            ans = st.radio(
+            radio_key = f"quiz_radio_{current_task.get('id')}_{q_idx}"
+            st.radio(
                 f"Select answer for Q{q_idx+1}:", 
                 q.get("options", []), 
-                key=f"quiz_{current_task.get('id')}_{q_idx}",
+                key=radio_key,
                 index=None
             )
-            correct_opt = q.get("options")[q.get("correct")] if q.get("options") and q.get("correct") < len(q.get("options")) else None
-            quiz_answers.append((ans, correct_opt))
             
         st.divider()
         st.write("#### 📊 Post-Session Confidence & Completion")
@@ -477,12 +485,22 @@ with col_workspace:
         )
         
         if st.button("✅ Complete Task", type="primary", key=f"complete_{current_task.get('id')}"):
-            score = sum(1 for user_ans, correct_ans in quiz_answers if user_ans is not None and user_ans == correct_ans)
-            
+            # Evaluate quiz responses against the frozen question data
+            score = 0
+            for q_idx, q in enumerate(test_q_list):
+                radio_key = f"quiz_radio_{current_task.get('id')}_{q_idx}"
+                user_choice = st.session_state.get(radio_key)
+                options = q.get("options", [])
+                correct_idx = q.get("correct", 0)
+                
+                if user_choice is not None and correct_idx < len(options):
+                    if user_choice == options[correct_idx]:
+                        score += 1
+
             current_task["status"] = "Completed"
             current_task["confidence"] = new_conf_val
             current_task["quiz_score"] = score
             st.session_state.selected_task_id = None
             
-            st.success(f"Task completed! Practice test score saved: {score}/5.")
+            st.success(f"Task completed! Exam test score saved: {score}/5.")
             st.rerun()
