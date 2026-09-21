@@ -83,7 +83,7 @@ if len(overdue_tasks) >= 3 and not st.session_state.recovery_triggered:
                 t["exam_date"] = today
 
 # ---------------------------------------------------------
-# 4. EXAM-BOARD SPECIFIC AI GENERATOR (WITH DIAGNOSTICS)
+# 4. EXAM-BOARD SPECIFIC AI GENERATOR
 # ---------------------------------------------------------
 def fetch_ai_breakdown(topic, subject, board, level, spec_details=""):
     """Generates specification-aligned content using OpenAI with diagnostic error handling."""
@@ -247,10 +247,64 @@ if not client:
 if st.session_state.recovery_triggered:
     st.info("ℹ️ **Recovery Mode Activated:** You had 3 or more overdue tasks. Workload times have been scaled back by 30% and schedule adjusted automatically.")
 
+# ---------------------------------------------------------
+# 7. PROGRESS TRACKER & SUBJECT MASTERY (NEW ADDITION)
+# ---------------------------------------------------------
+with st.container(border=True):
+    st.markdown("### 📊 Daily Progress & Subject Mastery")
+    
+    total_tasks = len(st.session_state.tasks)
+    completed_tasks = sum(1 for t in st.session_state.tasks if t.get("status") == "Completed")
+    today_completed = sum(1 for t in st.session_state.tasks if t.get("status") == "Completed" and t.get("exam_date") == today)
+    today_total = sum(1 for t in st.session_state.tasks if t.get("exam_date") == today)
+    
+    m1, m2, m3 = st.columns(3)
+    with m1:
+        st.metric("Today's Tasks Completed", f"{today_completed} / {today_total}")
+    with m2:
+        overall_pct = int((completed_tasks / total_tasks * 100)) if total_tasks > 0 else 0
+        st.metric("Overall Completion Rate", f"{overall_pct}%", f"{completed_tasks}/{total_tasks} Tasks Done")
+    with m3:
+        conf_scores = [t.get("confidence", 3) for t in st.session_state.tasks if t.get("status") == "Completed"]
+        avg_conf = sum(conf_scores) / len(conf_scores) if conf_scores else 0
+        st.metric("Avg Subject Confidence", f"{avg_conf:.1f} / 5.0" if conf_scores else "N/A")
+
+    st.markdown("---")
+    st.markdown("##### 📚 Subject Coverage & Mastery Bars")
+    
+    active_subjects = st.session_state.user_settings.get("selected_subjects", [])
+    if not active_subjects:
+        st.caption("No subjects selected in sidebar.")
+    else:
+        for sub in active_subjects:
+            sub_tasks = [t for t in st.session_state.tasks if t.get("subject") == sub]
+            sub_total = len(sub_tasks)
+            sub_done = sum(1 for t in sub_tasks if t.get("status") == "Completed")
+            
+            # Coverage calculation (Percentage of tasks completed)
+            coverage_pct = float(sub_done / sub_total) if sub_total > 0 else 0.0
+            
+            # Mastery calculation (Average confidence score on completed tasks / 5)
+            completed_sub_tasks = [t for t in sub_tasks if t.get("status") == "Completed"]
+            if completed_sub_tasks:
+                avg_sub_conf = sum(t.get("confidence", 3) for t in completed_sub_tasks) / len(completed_sub_tasks)
+                mastery_pct = int((avg_sub_conf / 5.0) * 100)
+            else:
+                mastery_pct = 0
+
+            col_sub_info, col_sub_bar = st.columns([1, 2])
+            with col_sub_info:
+                st.write(f"**{sub}** ({sub_done}/{sub_total} tasks completed)")
+            with col_sub_bar:
+                st.progress(
+                    coverage_pct, 
+                    text=f"Coverage: {int(coverage_pct * 100)}% | Mastery Score: {mastery_pct}%"
+                )
+
 st.divider()
 
 # ---------------------------------------------------------
-# 7. MAIN SCHEDULE & WORKSPACE
+# 8. MAIN SCHEDULE & WORKSPACE
 # ---------------------------------------------------------
 col_schedule, col_workspace = st.columns([1.1, 0.9])
 
