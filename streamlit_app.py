@@ -60,6 +60,8 @@ for t in st.session_state.tasks:
         t["est_minutes"] = 30
     if "exam_date" not in t:
         t["exam_date"] = t.get("scheduled_date", today)
+    if "target_exam_date" not in t:
+        t["target_exam_date"] = t.get("exam_date", today)
     if "spec_details" not in t:
         t["spec_details"] = ""
 
@@ -83,10 +85,10 @@ if len(overdue_tasks) >= 3 and not st.session_state.recovery_triggered:
                 t["exam_date"] = today
 
 # ---------------------------------------------------------
-# 4. EXAM-BOARD SPECIFIC AI GENERATOR
+# 4. AI TIME ESTIMATOR & CONTENT GENERATOR
 # ---------------------------------------------------------
 def fetch_ai_breakdown(topic, subject, board, level, spec_details=""):
-    """Generates specification-aligned content using OpenAI with diagnostic error handling."""
+    """Generates specification-aligned content and dynamic completion time using OpenAI."""
     
     default_fallback = {
         "est_minutes": 30,
@@ -148,12 +150,13 @@ def fetch_ai_breakdown(topic, subject, board, level, spec_details=""):
 
     CRITICAL REQUIREMENTS:
     1. Everything MUST strictly follow the official {board} {level} {subject} syllabus.
-    2. Flashcards must test exact definitions, formulas, or core mechanisms. Answers MUST be 100% complete, factual, and detailed.
-    3. Practice questions must mimic real {board} exam questions with realistic answer options.
+    2. Realistically estimate the required revision time in minutes ('est_minutes') based on topic complexity and depth (between 15 and 60 minutes). E.g., quick definitions = 15-20 mins, heavy calculation/essay topics = 35-60 mins.
+    3. Flashcards must test exact definitions, formulas, or core mechanisms. Answers MUST be 100% complete, factual, and detailed.
+    4. Practice questions must mimic real {board} exam questions with realistic answer options.
 
     Return ONLY a valid JSON object:
     {{
-      "est_minutes": integer (between 20 and 45),
+      "est_minutes": integer (realistic dynamic value between 15 and 60 based on complexity),
       "steps": [
         "Step 1 with specific resource (e.g. PMT, Cognito, Save My Exams, CGP, Seneca)",
         "Step 2 focusing on active recall or formula practice",
@@ -187,7 +190,31 @@ def fetch_ai_breakdown(topic, subject, board, level, spec_details=""):
         return default_fallback
 
 # ---------------------------------------------------------
-# 5. SIDEBAR: ACCOUNT & PERSONALISATION
+# 5. WORKLOAD BALANCING SCHEDULER
+# ---------------------------------------------------------
+def calculate_optimal_scheduled_date(target_exam_date):
+    """Distributes tasks evenly across days leading up to the exam date based on current workload."""
+    if target_exam_date <= today:
+        return today
+        
+    # Schedule across days starting today up to the day before the exam (or up to target date if exam is tomorrow)
+    last_study_day = max(today, target_exam_date - timedelta(days=1))
+    num_days = (last_study_day - today).days + 1
+    candidate_days = [today + timedelta(days=i) for i in range(num_days)]
+    
+    # Calculate current total scheduled minutes per day
+    day_workloads = {d: 0 for d in candidate_days}
+    for t in st.session_state.tasks:
+        d = t.get("exam_date")
+        if d in day_workloads and t.get("status") != "Completed":
+            day_workloads[d] += t.get("est_minutes", 30)
+            
+    # Pick the day in the lead-up window with the lowest total workload
+    best_day = min(candidate_days, key=lambda d: day_workloads[d])
+    return best_day
+
+# ---------------------------------------------------------
+# 6. SIDEBAR: ACCOUNT & PERSONALISATION
 # ---------------------------------------------------------
 with st.sidebar:
     st.header("👤 Account Sync")
@@ -236,7 +263,7 @@ with st.sidebar:
         st.session_state.user_settings["subject_boards"][sub] = new_board
 
 # ---------------------------------------------------------
-# 6. HEADER & RECOVERY BANNER
+# 7. HEADER & RECOVERY BANNER
 # ---------------------------------------------------------
 st.title("⚡ Unstuck")
 st.caption("Adaptive Revision Planner • Beat Procrastination with Day-by-Day Micro-Steps")
@@ -248,7 +275,7 @@ if st.session_state.recovery_triggered:
     st.info("ℹ️ **Recovery Mode Activated:** You had 3 or more overdue tasks. Workload times have been scaled back by 30% and schedule adjusted automatically.")
 
 # ---------------------------------------------------------
-# 7. PROGRESS TRACKER & SUBJECT MASTERY (NEW ADDITION)
+# 8. PROGRESS TRACKER & SUBJECT MASTERY
 # ---------------------------------------------------------
 with st.container(border=True):
     st.markdown("### 📊 Daily Progress & Subject Mastery")
@@ -281,10 +308,8 @@ with st.container(border=True):
             sub_total = len(sub_tasks)
             sub_done = sum(1 for t in sub_tasks if t.get("status") == "Completed")
             
-            # Coverage calculation (Percentage of tasks completed)
             coverage_pct = float(sub_done / sub_total) if sub_total > 0 else 0.0
             
-            # Mastery calculation (Average confidence score on completed tasks / 5)
             completed_sub_tasks = [t for t in sub_tasks if t.get("status") == "Completed"]
             if completed_sub_tasks:
                 avg_sub_conf = sum(t.get("confidence", 3) for t in completed_sub_tasks) / len(completed_sub_tasks)
@@ -304,7 +329,7 @@ with st.container(border=True):
 st.divider()
 
 # ---------------------------------------------------------
-# 8. MAIN SCHEDULE & WORKSPACE
+# 9. MAIN SCHEDULE & WORKSPACE
 # ---------------------------------------------------------
 col_schedule, col_workspace = st.columns([1.1, 0.9])
 
@@ -320,7 +345,7 @@ with col_schedule:
             
             new_spec = st.text_area("Specification Points / Sub-topics (Optional)", placeholder="e.g. AQA 3.1.2 Amount of substance, empirical formula, ideal gas equation pV=nRT")
             
-            new_exam_date = st.date_input("Exam Date / Target Date", today)
+            new_exam_date = st.date_input("Target Exam Date", today + timedelta(days=7))
             new_conf = st.slider("Current Confidence Rating (1-5)", 1, 5, 3)
             
             if st.form_submit_button("➕ Add Task to Schedule"):
@@ -329,8 +354,12 @@ with col_schedule:
                     curr_level = st.session_state.user_settings["level"]
                     new_id = max([t.get("id", 0) for t in st.session_state.tasks], default=0) + 1
                     
+                    # AI estimates realistic study duration based on topic complexity
                     content_preview = fetch_ai_breakdown(new_top.strip(), new_sub, assigned_board, curr_level, new_spec.strip())
                     est_time = content_preview.get("est_minutes", 30)
+                    
+                    # Intelligently assign optimal revision date leading up to the target exam
+                    optimal_rev_date = calculate_optimal_scheduled_date(new_exam_date)
                     
                     st.session_state.tasks.append({
                         "id": new_id,
@@ -338,13 +367,14 @@ with col_schedule:
                         "exam_board": assigned_board,
                         "topic": new_top.strip(),
                         "spec_details": new_spec.strip(),
-                        "exam_date": new_exam_date,
+                        "exam_date": optimal_rev_date,          # Assigned revision day
+                        "target_exam_date": new_exam_date,      # Date of actual exam
                         "est_minutes": est_time,
                         "status": "Pending",
                         "confidence": new_conf,
                         "quiz_score": None
                     })
-                    st.success(f"Added '{new_top}'! Target time: {est_time} mins.")
+                    st.success(f"Added '{new_top}'! Scheduled for {optimal_rev_date.strftime('%a %b %d')} (AI Est: {est_time} mins).")
                     st.rerun()
                 else:
                     st.error("Please enter a topic name.")
@@ -373,7 +403,8 @@ with col_schedule:
                             sub_text = task.get('subject', 'General')
                             board_text = task.get('exam_board', 'AQA')
                             conf_text = task.get('confidence', 3)
-                            st.caption(f"{sub_text} ({board_text}) • Conf: {conf_text}/5")
+                            target_str = task.get('target_exam_date', task.get('exam_date')).strftime("%b %d")
+                            st.caption(f"{sub_text} ({board_text}) • Exam: {target_str} • Conf: {conf_text}/5")
                         with c2:
                             st.caption(f"⏱️ {task.get('est_minutes', 30)} mins")
                             if task.get("quiz_score") is not None:
@@ -437,7 +468,6 @@ with col_workspace:
         st.divider()
         st.write("#### 📊 Post-Session Confidence & Completion")
         
-        # Confidence Rating (1-5 Scale)
         new_conf_val = st.slider(
             "Rate your confidence level after completing this session (1-5):",
             min_value=1,
@@ -449,7 +479,6 @@ with col_workspace:
         if st.button("✅ Complete Task", type="primary", key=f"complete_{current_task.get('id')}"):
             score = sum(1 for user_ans, correct_ans in quiz_answers if user_ans is not None and user_ans == correct_ans)
             
-            # Update session state
             current_task["status"] = "Completed"
             current_task["confidence"] = new_conf_val
             current_task["quiz_score"] = score
