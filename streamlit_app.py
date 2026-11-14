@@ -475,8 +475,18 @@ with st.sidebar:
 # ---------------------------------------------------------
 # 7. HEADER & RECOVERY BANNER
 # ---------------------------------------------------------
-st.title("⚡ Unstuck")
-st.caption("Adaptive Revision Planner • Beat Procrastination with Day-by-Day Micro-Steps")
+_due = sum(1 for t in st.session_state.tasks if t.get("exam_date") == today and t.get("status") != "Completed")
+_mins = sum(t.get("est_minutes", 30) for t in st.session_state.tasks if t.get("exam_date") == today and t.get("status") != "Completed")
+st.markdown("".join([
+    '<div class="hero"><div>',
+    '<div class="hero-title">⚡ Unstuck</div>',
+    '<div class="hero-sub">Adaptive revision planner · small steps, real progress</div>',
+    '</div><div>',
+    f'<span class="hero-chip">📌 {_due} due today</span>',
+    f'<span class="hero-chip">⏱️ {_mins} min</span>',
+    f'<span class="hero-chip">📅 {today.strftime("%a %d %b")}</span>',
+    '</div></div>',
+]), unsafe_allow_html=True)
 
 if not client:
     st.warning("⚠️ **OpenAI API Key Not Detected:** Add `OPENAI_API_KEY` into Streamlit Secrets to enable live AI task generation.")
