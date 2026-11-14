@@ -677,6 +677,7 @@ with col_workspace:
                     current_task.get('spec_details', '')
                 )
                 current_task["est_minutes"] = current_task["ai_content"].get("est_minutes", 30)
+                update_task(current_task)
 
         content = current_task["ai_content"]
         
