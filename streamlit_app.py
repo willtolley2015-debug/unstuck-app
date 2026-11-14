@@ -17,7 +17,7 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-.block-container {padding-top: 2rem; max-width: 1300px;}
+.block-container {padding-top: 4.5rem; max-width: 1300px;}
 footer, #MainMenu {visibility: hidden;}
 
 /* Metric cards */
