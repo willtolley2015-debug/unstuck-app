@@ -14,7 +14,67 @@ st.set_page_config(
     page_icon="⚡",
     layout="wide"
 )
+st.markdown("""
+<style>
+.block-container {padding-top: 2rem; max-width: 1300px;}
+footer, #MainMenu {visibility: hidden;}
 
+/* Metric cards */
+[data-testid="stMetric"] {
+    background: rgba(99,102,241,0.06);
+    border: 1px solid rgba(128,128,128,0.2);
+    border-left: 4px solid #6366f1;
+    border-radius: 14px;
+    padding: 14px 18px;
+}
+[data-testid="stMetricLabel"] {opacity: .75; font-weight: 600;}
+[data-testid="stMetricValue"] {font-weight: 800;}
+
+/* Bordered containers */
+div[data-testid="stVerticalBlockBorderWrapper"] {border-radius: 14px;}
+
+/* Buttons */
+.stButton > button, .stFormSubmitButton > button {
+    border-radius: 10px; font-weight: 600; transition: all .15s ease;
+}
+.stButton > button:hover, .stFormSubmitButton > button:hover {
+    transform: translateY(-1px); box-shadow: 0 4px 14px rgba(99,102,241,.25);
+}
+
+/* Tabs */
+button[data-baseweb="tab"] {font-weight: 600;}
+
+/* Hero banner */
+.hero {
+    background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 60%, #ec4899 100%);
+    color: #fff; border-radius: 18px; padding: 26px 30px; margin-bottom: 18px;
+    display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;
+}
+.hero-title {font-size: 2.1rem; font-weight: 800; letter-spacing: -0.02em; line-height: 1.1;}
+.hero-sub {opacity: .9; margin-top: 6px;}
+.hero-chip {
+    background: rgba(255,255,255,.18); border-radius: 999px; padding: 6px 14px;
+    font-weight: 600; font-size: .9rem; display: inline-block; margin-left: 6px;
+}
+
+/* Pills */
+.pill {display:inline-block; padding:2px 10px; border-radius:999px; font-size:.75rem;
+       font-weight:600; margin:0 6px 4px 0;}
+.pill-blue {background: rgba(99,102,241,.15); color:#6366f1;}
+.pill-grey {background: rgba(128,128,128,.15); color:#888;}
+.pill-green{background: rgba(34,197,94,.15);  color:#16a34a;}
+.pill-amber{background: rgba(245,158,11,.18); color:#d97706;}
+.pill-red  {background: rgba(239,68,68,.15);  color:#dc2626;}
+</style>
+""", unsafe_allow_html=True)
+
+def pill(text, kind="grey"):
+    return f'<span class="pill pill-{kind}">{html.escape(str(text))}</span>'
+
+def conf_pill(c):
+    c = int(c)
+    kind = "red" if c <= 2 else ("amber" if c == 3 else "green")
+    return pill("●" * c + "○" * (5 - c) + f"  {c}/5", kind)
 # Safe OpenAI Client Setup
 openai_api_key = st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY", "")).strip()
 has_valid_key = len(openai_api_key) > 10 and not openai_api_key.startswith("your-")
