@@ -914,7 +914,7 @@ with col_schedule:
     
     for i, day in enumerate(days):
         with tabs[i]:
-           day_tasks = sorted([t for t in st.session_state.tasks if t.get("exam_date") == day], key=task_sort_key)
+            day_tasks = sorted([t for t in st.session_state.tasks if t.get("exam_date") == day], key=task_sort_key)
             
             if not day_tasks:
                 st.caption("✨ No tasks scheduled for this date. Use 'Add Task to Schedule' above.")
