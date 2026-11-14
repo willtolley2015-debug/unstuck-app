@@ -3,8 +3,9 @@ import datetime
 from datetime import timedelta
 import json
 import os
+import html
 from openai import OpenAI
-
+from supabase import create_client
 # ---------------------------------------------------------
 # 1. PAGE SETUP
 # ---------------------------------------------------------
