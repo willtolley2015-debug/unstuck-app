@@ -505,16 +505,17 @@ with st.container(border=True):
     today_completed = sum(1 for t in st.session_state.tasks if t.get("status") == "Completed" and t.get("exam_date") == today)
     today_total = sum(1 for t in st.session_state.tasks if t.get("exam_date") == today)
     
-    m1, m2, m3 = st.columns(3)
-    with m1:
-        st.metric("Today's Tasks Completed", f"{today_completed} / {today_total}")
-    with m2:
-        overall_pct = int((completed_tasks / total_tasks * 100)) if total_tasks > 0 else 0
-        st.metric("Overall Completion Rate", f"{overall_pct}%", f"{completed_tasks}/{total_tasks} Tasks Done")
-    with m3:
-        conf_scores = [t.get("confidence", 3) for t in st.session_state.tasks if t.get("status") == "Completed"]
-        avg_conf = sum(conf_scores) / len(conf_scores) if conf_scores else 0
-        st.metric("Avg Subject Confidence", f"{avg_conf:.1f} / 5.0" if conf_scores else "N/A")
+    pending_today_mins = sum(t.get("est_minutes", 30) for t in st.session_state.tasks
+                             if t.get("exam_date") == today and t.get("status") != "Completed")
+    overall_pct = int((completed_tasks / total_tasks * 100)) if total_tasks > 0 else 0
+    conf_scores = [t.get("confidence", 3) for t in st.session_state.tasks if t.get("status") == "Completed"]
+    avg_conf = sum(conf_scores) / len(conf_scores) if conf_scores else 0
+
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("📌 Today", f"{today_completed} / {today_total}", "tasks done")
+    m2.metric("🏁 Overall", f"{overall_pct}%", f"{completed_tasks}/{total_tasks} done")
+    m3.metric("💪 Avg Confidence", f"{avg_conf:.1f} / 5" if conf_scores else "N/A")
+    m4.metric("⏱️ Left Today", f"{pending_today_mins} min")
 
     st.markdown("---")
     st.markdown("##### 📚 Subject Coverage & Mastery Bars")
