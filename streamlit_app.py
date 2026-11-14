@@ -470,6 +470,8 @@ with st.sidebar:
         new_board = st.selectbox(f"{sub} Board", boards, index=board_idx, key=f"board_select_{sub}")
         st.session_state.user_settings["subject_boards"][sub] = new_board
 
+    save_settings_if_changed()
+
 # ---------------------------------------------------------
 # 7. HEADER & RECOVERY BANNER
 # ---------------------------------------------------------
