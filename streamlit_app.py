@@ -873,9 +873,9 @@ with col_schedule:
                 if new_top.strip():
                     assigned_board = st.session_state.user_settings["subject_boards"].get(new_sub, "AQA")
                     curr_level = st.session_state.user_settings["level"]
+                    easier = is_struggling(new_sub)
                     with st.spinner("Analyzing topic depth and generating exam content..."):
-                        content_preview = fetch_ai_breakdown(new_top.strip(), new_sub, assigned_board, curr_level, new_spec.strip())
-
+                        content_preview = fetch_ai_breakdown(new_top.strip(), new_sub, assigned_board, curr_level, new_spec.strip(), easier=easier)
                     est_time = content_preview.get("est_minutes", 30)
                     optimal_rev_date = calculate_optimal_scheduled_date(new_exam_date)
 
@@ -898,7 +898,10 @@ with col_schedule:
                     except Exception as e:
                         st.error(f"Could not save task: {e}")
                         st.stop()
-                    st.success(f"Added '{new_top}'! Scheduled for {optimal_rev_date.strftime('%a %b %d')} (AI Estimated: {est_time} mins).")
+                    st.session_state.flash = (
+                        f"Added '{new_top}'! Scheduled for {optimal_rev_date.strftime('%a %b %d')} (AI estimated: {est_time} mins)."
+                        + (f" 🌱 Confidence-builder mode: gentler content, because your last {new_sub} task was tough." if easier else "")
+                    )
                     st.rerun()
                 else:
                     st.error("Please enter a topic name.")
