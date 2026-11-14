@@ -573,29 +573,31 @@ with col_schedule:
                 if new_top.strip():
                     assigned_board = st.session_state.user_settings["subject_boards"].get(new_sub, "AQA")
                     curr_level = st.session_state.user_settings["level"]
-                    new_id = max([t.get("id", 0) for t in st.session_state.tasks], default=0) + 1
-                    
-                    # Fetch AI content ONCE at creation time and save inside task dictionary
                     with st.spinner("Analyzing topic depth and generating exam content..."):
                         content_preview = fetch_ai_breakdown(new_top.strip(), new_sub, assigned_board, curr_level, new_spec.strip())
-                    
+
                     est_time = content_preview.get("est_minutes", 30)
                     optimal_rev_date = calculate_optimal_scheduled_date(new_exam_date)
-                    
-                    st.session_state.tasks.append({
-                        "id": new_id,
+
+                    new_task = {
                         "subject": new_sub,
                         "exam_board": assigned_board,
                         "topic": new_top.strip(),
                         "spec_details": new_spec.strip(),
-                        "exam_date": optimal_rev_date,          
-                        "target_exam_date": new_exam_date,      
+                        "exam_date": optimal_rev_date,
+                        "target_exam_date": new_exam_date,
                         "est_minutes": est_time,
-                        "ai_content": content_preview,          # Frozen AI content cached in session state
+                        "ai_content": content_preview,
                         "status": "Pending",
                         "confidence": new_conf,
-                        "quiz_score": None
-                    })
+                        "quiz_score": None,
+                    }
+                    try:
+                        new_task["id"] = insert_task(new_task)
+                        st.session_state.tasks.append(new_task)
+                    except Exception as e:
+                        st.error(f"Could not save task: {e}")
+                        st.stop()
                     st.success(f"Added '{new_top}'! Scheduled for {optimal_rev_date.strftime('%a %b %d')} (AI Estimated: {est_time} mins).")
                     st.rerun()
                 else:
