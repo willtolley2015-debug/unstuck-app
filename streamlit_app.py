@@ -733,7 +733,7 @@ with col_workspace:
             current_task["status"] = "Completed"
             current_task["confidence"] = new_conf_val
             current_task["quiz_score"] = score
-                        try:
+            try:
                 update_task(current_task)
             except Exception as e:
                 st.error(f"Could not save progress: {e}")
