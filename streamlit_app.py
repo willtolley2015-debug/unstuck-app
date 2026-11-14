@@ -14,6 +14,7 @@ st.set_page_config(
     page_icon="⚡",
     layout="wide"
 )
+
 st.markdown("""
 <style>
 .block-container {padding-top: 2rem; max-width: 1300px;}
