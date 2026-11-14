@@ -83,6 +83,154 @@ has_valid_key = len(openai_api_key) > 10 and not openai_api_key.startswith("your
 client = OpenAI(api_key=openai_api_key) if has_valid_key else None
 
 # ---------------------------------------------------------
+# 1b. SUPABASE: AUTH + PERSISTENCE
+# ---------------------------------------------------------
+DEFAULT_BOARDS = {
+    "Chemistry": "AQA", "Physics": "OCR A", "Maths": "Edexcel", "Biology": "AQA",
+    "English Literature": "Edexcel", "History": "AQA", "Computer Science": "OCR"
+}
+
+def get_sb():
+    """One Supabase client PER browser session (it holds that user's auth token)."""
+    if "sb" not in st.session_state:
+        st.session_state.sb = create_client(
+            st.secrets["SUPABASE_URL"], st.secrets["SUPABASE_ANON_KEY"]
+        )
+    return st.session_state.sb
+
+def sign_in(email, password):
+    res = get_sb().auth.sign_in_with_password({"email": email, "password": password})
+    st.session_state.user = {"id": res.user.id, "email": res.user.email}
+
+def sign_up(email, password):
+    """Returns True if logged in immediately, False if email confirmation is needed."""
+    res = get_sb().auth.sign_up({"email": email, "password": password})
+    if res.session and res.user:
+        st.session_state.user = {"id": res.user.id, "email": res.user.email}
+        return True
+    return False
+
+def sign_out():
+    try:
+        get_sb().auth.sign_out()
+    except Exception:
+        pass
+    for k in list(st.session_state.keys()):
+        del st.session_state[k]
+
+def _task_from_row(r):
+    return {
+        "id": r["id"], "subject": r["subject"], "exam_board": r.get("exam_board") or "AQA",
+        "topic": r["topic"], "spec_details": r.get("spec_details") or "",
+        "exam_date": datetime.date.fromisoformat(r["exam_date"]),
+        "target_exam_date": datetime.date.fromisoformat(r["target_exam_date"]),
+        "est_minutes": r.get("est_minutes", 30), "status": r.get("status", "Pending"),
+        "confidence": r.get("confidence", 3), "quiz_score": r.get("quiz_score"),
+        "ai_content": r.get("ai_content"),
+    }
+
+def load_user_data():
+    """Load this user's settings and tasks into session_state."""
+    sb = get_sb()
+    uid = st.session_state.user["id"]
+
+    rows = sb.table("user_settings").select("*").eq("user_id", uid).execute().data
+    if rows:
+        r = rows[0]
+        st.session_state.user_settings = {
+            "level": r["level"], "weekly_hours": r["weekly_hours"],
+            "selected_subjects": r["selected_subjects"],
+            "subject_boards": {**DEFAULT_BOARDS, **(r["subject_boards"] or {})},
+        }
+        st.session_state._saved_settings = json.dumps(st.session_state.user_settings, sort_keys=True)
+    else:
+        st.session_state._saved_settings = None   # new user: defaults get saved on first run
+
+    trows = sb.table("tasks").select("*").eq("user_id", uid).order("id").execute().data
+    st.session_state.tasks = [_task_from_row(r) for r in trows]
+
+def save_settings_if_changed():
+    snap = json.dumps(st.session_state.user_settings, sort_keys=True)
+    if snap == st.session_state.get("_saved_settings"):
+        return
+    s = st.session_state.user_settings
+    get_sb().table("user_settings").upsert({
+        "user_id": st.session_state.user["id"], "level": s["level"],
+        "weekly_hours": s["weekly_hours"], "selected_subjects": s["selected_subjects"],
+        "subject_boards": s["subject_boards"],
+    }).execute()
+    st.session_state._saved_settings = snap
+
+def insert_task(task):
+    """Insert a task (dict without id). Returns the DB-generated id."""
+    res = get_sb().table("tasks").insert({
+        "user_id": st.session_state.user["id"], "subject": task["subject"],
+        "exam_board": task["exam_board"], "topic": task["topic"],
+        "spec_details": task["spec_details"],
+        "exam_date": task["exam_date"].isoformat(),
+        "target_exam_date": task["target_exam_date"].isoformat(),
+        "est_minutes": task["est_minutes"], "status": task["status"],
+        "confidence": task["confidence"], "quiz_score": task["quiz_score"],
+        "ai_content": task.get("ai_content"),
+    }).execute()
+    return res.data[0]["id"]
+
+def update_task(task):
+    """Persist the fields that change after creation."""
+    get_sb().table("tasks").update({
+        "status": task["status"], "confidence": task["confidence"],
+        "quiz_score": task["quiz_score"], "est_minutes": task["est_minutes"],
+        "exam_date": task["exam_date"].isoformat(),
+        "ai_content": task.get("ai_content"),
+    }).eq("id", task["id"]).execute()
+
+def auth_screen():
+    _, mid, _ = st.columns([1, 1.3, 1])
+    with mid:
+        st.markdown(
+            '<div class="hero" style="flex-direction:column;text-align:center;">'
+            '<div class="hero-title">⚡ Unstuck</div>'
+            '<div class="hero-sub">Adaptive revision planning that adjusts to how you\'re really doing.</div>'
+            '</div>', unsafe_allow_html=True)
+        tab_in, tab_up = st.tabs(["Sign in", "Create account"])
+
+        with tab_in:
+            with st.form("signin_form"):
+                email = st.text_input("Email")
+                pwd = st.text_input("Password", type="password")
+                go = st.form_submit_button("Sign in", type="primary", use_container_width=True)
+            if go:
+                ok = False
+                try:
+                    sign_in(email.strip(), pwd)
+                    ok = True
+                except Exception as e:
+                    st.error(f"Sign in failed: {e}")
+                if ok:
+                    st.rerun()
+
+        with tab_up:
+            with st.form("signup_form"):
+                email2 = st.text_input("Email", key="su_email")
+                pwd2 = st.text_input("Password (min 6 characters)", type="password", key="su_pwd")
+                go2 = st.form_submit_button("Create account", type="primary", use_container_width=True)
+            if go2:
+                ok = False
+                try:
+                    ok = sign_up(email2.strip(), pwd2)
+                    if not ok:
+                        st.success("Account created. Check your email to confirm it, then sign in.")
+                except Exception as e:
+                    st.error(f"Sign up failed: {e}")
+                if ok:
+                    st.rerun()
+
+# --- LOGIN GATE: nothing below runs until the user is signed in ---
+if "user" not in st.session_state or st.session_state.user is None:
+    auth_screen()
+    st.stop()
+    
+# ---------------------------------------------------------
 # 2. SESSION STATE
 # ---------------------------------------------------------
 if "user" not in st.session_state:
