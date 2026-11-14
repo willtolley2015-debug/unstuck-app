@@ -254,8 +254,9 @@ if "user_settings" not in st.session_state:
 
 today = datetime.date.today()
 
-if "tasks" not in st.session_state:
-    st.session_state.tasks = []
+if "data_loaded" not in st.session_state:
+    load_user_data()
+    st.session_state.data_loaded = True
 
 # Backwards compatibility check & state initialization
 for t in st.session_state.tasks:
