@@ -75,6 +75,7 @@ def conf_pill(c):
     c = int(c)
     kind = "red" if c <= 2 else ("amber" if c == 3 else "green")
     return pill("●" * c + "○" * (5 - c) + f"  {c}/5", kind)
+    
 # Safe OpenAI Client Setup
 openai_api_key = st.secrets.get("OPENAI_API_KEY", os.getenv("OPENAI_API_KEY", "")).strip()
 has_valid_key = len(openai_api_key) > 10 and not openai_api_key.startswith("your-")
