@@ -295,6 +295,7 @@ if len(overdue_tasks) >= 3 and not st.session_state.recovery_triggered:
             t["est_minutes"] = max(15, int(t.get("est_minutes", 30) * 0.7))
             if t.get("exam_date", today) < today:
                 t["exam_date"] = today
+            update_task(t)
 
 # ---------------------------------------------------------
 # 4. AI TIME ESTIMATOR & CONTENT GENERATOR
