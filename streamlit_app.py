@@ -616,35 +616,35 @@ with col_schedule:
             if not day_tasks:
                 st.caption("✨ No tasks scheduled for this date. Use 'Add Task to Schedule' above.")
             else:
-            _done = sum(1 for t in day_tasks if t.get("status") == "Completed")
-            _left = sum(t.get("est_minutes", 30) for t in day_tasks if t.get("status") != "Completed")
-            st.progress(_done / len(day_tasks), text=f"{_done}/{len(day_tasks)} done · {_left} min remaining")
-
-            for task in day_tasks:
-                is_completed = task.get("status") == "Completed"
-                status_icon = "✅" if is_completed else ("🔴" if task.get("exam_date", today) < today else "🔵")
-                target_str = task.get("target_exam_date", task.get("exam_date")).strftime("%d %b")
-
-                with st.container(border=True):
-                    c1, c2 = st.columns([4, 1.3])
-                    with c1:
-                        st.markdown(f"**{status_icon} {task.get('topic', 'Topic')}**")
-                        pills = (
-                            pill(f"{task.get('subject')} · {task.get('exam_board')}", "blue")
-                            + pill(f"⏱ {task.get('est_minutes', 30)} min", "grey")
-                            + pill(f"Exam {target_str}", "grey")
-                            + conf_pill(task.get("confidence", 3))
-                        )
-                        if task.get("quiz_score") is not None:
-                            pills += pill(f"Test {task['quiz_score']}/5", "green")
-                        st.markdown(pills, unsafe_allow_html=True)
-                    with c2:
-                        if not is_completed:
-                            if st.button("🚀 Unstuck", key=f"btn_unstuck_{task.get('id')}", use_container_width=True, type="primary"):
-                                st.session_state.selected_task_id = task.get("id")
-                                st.rerun()
-                        else:
-                            st.success("Done", icon="✅")
+                _done = sum(1 for t in day_tasks if t.get("status") == "Completed")
+                _left = sum(t.get("est_minutes", 30) for t in day_tasks if t.get("status") != "Completed")
+                st.progress(_done / len(day_tasks), text=f"{_done}/{len(day_tasks)} done · {_left} min remaining")
+    
+                for task in day_tasks:
+                    is_completed = task.get("status") == "Completed"
+                    status_icon = "✅" if is_completed else ("🔴" if task.get("exam_date", today) < today else "🔵")
+                    target_str = task.get("target_exam_date", task.get("exam_date")).strftime("%d %b")
+    
+                    with st.container(border=True):
+                        c1, c2 = st.columns([4, 1.3])
+                        with c1:
+                            st.markdown(f"**{status_icon} {task.get('topic', 'Topic')}**")
+                            pills = (
+                                pill(f"{task.get('subject')} · {task.get('exam_board')}", "blue")
+                                + pill(f"⏱ {task.get('est_minutes', 30)} min", "grey")
+                                + pill(f"Exam {target_str}", "grey")
+                                + conf_pill(task.get("confidence", 3))
+                            )
+                            if task.get("quiz_score") is not None:
+                                pills += pill(f"Test {task['quiz_score']}/5", "green")
+                            st.markdown(pills, unsafe_allow_html=True)
+                        with c2:
+                            if not is_completed:
+                                if st.button("🚀 Unstuck", key=f"btn_unstuck_{task.get('id')}", use_container_width=True, type="primary"):
+                                    st.session_state.selected_task_id = task.get("id")
+                                    st.rerun()
+                            else:
+                                st.success("Done", icon="✅")
 
 # --- RIGHT COLUMN: WORKSPACE ---
 with col_workspace:
