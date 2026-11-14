@@ -987,65 +987,104 @@ with col_workspace:
                 update_task(current_task)
 
         content = current_task["ai_content"]
-        
-        st.divider()
-        st.write("#### 🎯 3 Best Learning Steps & Recommended Resources")
-        for idx, step in enumerate(content.get("steps", []), 1):
-            st.checkbox(f"**Step {idx}:** {step}", key=f"chk_{current_task.get('id')}_{idx}")
-            
-        st.divider()
-        st.write("#### 🧠 Key Topic Flashcards")
-        for fc_idx, fc in enumerate(content.get("flashcards", []), 1):
-            with st.expander(f"🎴 Flashcard {fc_idx}: {fc.get('q')}"):
-                st.write(f"**Answer:** {fc.get('a')}")
-                
-        st.divider()
-        st.write("#### 📝 5 Exam Practice Questions")
-        
-        test_q_list = content.get("test_questions", [])
-        for q_idx, q in enumerate(test_q_list):
-            st.write(f"**Q{q_idx+1}: {q.get('q')}**")
-            radio_key = f"quiz_radio_{current_task.get('id')}_{q_idx}"
-            st.radio(
-                f"Select answer for Q{q_idx+1}:", 
-                q.get("options", []), 
-                key=radio_key,
-                index=None
-            )
-            
-        st.divider()
-        st.write("#### 📊 Post-Session Confidence & Completion")
-        
-        new_conf_val = st.slider(
-            "Rate your confidence level after completing this session (1-5):",
-            min_value=1,
-            max_value=5,
-            value=int(current_task.get("confidence", 3)),
-            key=f"conf_slider_{current_task.get('id')}"
-        )
-        
-        if st.button("✅ Complete Task", type="primary", key=f"complete_{current_task.get('id')}"):
-            # Evaluate quiz responses against the frozen question data
-            score = 0
-            for q_idx, q in enumerate(test_q_list):
-                radio_key = f"quiz_radio_{current_task.get('id')}_{q_idx}"
-                user_choice = st.session_state.get(radio_key)
-                options = q.get("options", [])
-                correct_idx = q.get("correct", 0)
-                
-                if user_choice is not None and correct_idx < len(options):
-                    if user_choice == options[correct_idx]:
-                        score += 1
+        tid = current_task.get("id")
 
-            current_task["status"] = "Completed"
-            current_task["confidence"] = new_conf_val
-            current_task["quiz_score"] = score
-            try:
-                update_task(current_task)
-            except Exception as e:
-                st.error(f"Could not save progress: {e}")
-                st.stop()
-            st.session_state.selected_task_id = None
-            
-            st.success(f"Task completed! Exam test score saved: {score}/5.")
-            st.rerun()
+        # Keep answers and ticks alive when flipping between the Learn and Practice pages
+        for _k in list(st.session_state.keys()):
+            if isinstance(_k, str) and _k.startswith(("qa_", "chk_", "conf_slider_")):
+                st.session_state[_k] = st.session_state[_k]
+
+        if content.get("mode") == "confidence_builder":
+            st.info("🌱 **Confidence-builder mode:** this plan is gentler and shorter. Small wins first!")
+
+        page = st.radio("Page", ["📚 Learn", "📝 Practice"], horizontal=True,
+                        key=f"ws_page_{tid}", label_visibility="collapsed")
+
+        if page.startswith("📚"):
+            st.write("#### 🎯 3 Best Learning Steps & Recommended Resources")
+            for idx, step in enumerate(content.get("steps", []), 1):
+                st.checkbox(f"**Step {idx}:** {step}", key=f"chk_{tid}_{idx}")
+
+            st.divider()
+            st.write("#### 🧠 Flashcards")
+            st.caption("Click a card to flip it · arrows (or ← → keys) to move on · 🔀 to shuffle")
+            render_flashcards(content.get("flashcards", []))
+            st.info("Ready to test yourself? Switch to the **📝 Practice** page above.")
+
+        else:
+            qs = content.get("test_questions", [])
+            total_marks = sum(q_marks(q) for q in qs)
+            st.write("#### 📝 Exam Practice")
+            st.caption(f"{len(qs)} questions · {total_marks} marks · multiple choice, calculations and written answers")
+
+            for i, q in enumerate(qs):
+                qtype = q.get("type", "mcq")
+                key = f"qa_{tid}_{i}"
+                with st.container(border=True):
+                    st.markdown(f"**Q{i+1}.** {q.get('q')}")
+                    st.markdown(
+                        pill(TYPE_LABELS.get(qtype, "Question"), "blue")
+                        + pill(f"{q_marks(q)} mark{'s' if q_marks(q) != 1 else ''}", "grey"),
+                        unsafe_allow_html=True)
+                    if qtype == "numeric":
+                        st.text_input("Your answer (number)", key=key,
+                                      placeholder=f"e.g. 12.5 {q.get('unit', '')}".strip())
+                    elif qtype == "short":
+                        st.text_area("Your answer", key=key, height=120,
+                                     placeholder="Write your answer. Each mark-scheme point you make earns a mark.")
+                    else:
+                        st.radio("Choose an answer", q.get("options", []), key=key,
+                                 index=None, label_visibility="collapsed")
+
+            if st.button("📤 Submit answers for marking", type="primary",
+                         key=f"submit_{tid}", use_container_width=True):
+                with st.spinner("Marking your answers..."):
+                    st.session_state[f"quiz_result_{tid}"] = mark_quiz(
+                        qs, tid, current_task.get("subject"), current_task.get("exam_board"),
+                        st.session_state.user_settings["level"])
+
+            res = st.session_state.get(f"quiz_result_{tid}")
+            if res:
+                st.progress(res["pct"] / 100, text=f"Your mark: {res['got']}/{res['total']} ({res['pct']}%)")
+                if res["pct"] <= 40:
+                    st.info("That one was tough, and that's useful to know. Complete the task and Unstuck will schedule a gentler review and make your next task easier.")
+                elif res["pct"] >= 80:
+                    st.success("Great work! You clearly know this topic.")
+                for d in res["details"]:
+                    q = qs[d["i"]]
+                    icon = "✅" if d["marks"] == d["max"] else ("🟡" if d["marks"] > 0 else "❌")
+                    with st.expander(f"{icon} Q{d['i'] + 1}: {d['marks']}/{d['max']} marks"):
+                        st.markdown(f"**Your answer:** {d['answer'] if d['answer'] else '_No answer_'}")
+                        st.markdown(f"**Feedback:** {d['feedback']}")
+                        if d["type"] == "short" and q.get("mark_scheme"):
+                            st.markdown("**Mark scheme:**")
+                            for pt in q["mark_scheme"]:
+                                st.markdown(f"- {pt}")
+
+            st.divider()
+            st.write("#### 📊 Confidence & Completion")
+            new_conf_val = st.slider(
+                "Rate your confidence now (1-5):", min_value=1, max_value=5,
+                value=int(current_task.get("confidence", 3)), key=f"conf_slider_{tid}")
+            if not res:
+                st.caption("Tip: submit the questions first so your test mark is saved and Unstuck can adapt your plan.")
+
+            if st.button("✅ Complete Task", type="primary", key=f"complete_{tid}"):
+                current_task["status"] = "Completed"
+                current_task["confidence"] = new_conf_val
+                current_task["quiz_score"] = res["pct"] if res else None
+                try:
+                    update_task(current_task)
+                except Exception as e:
+                    st.error(f"Could not save progress: {e}")
+                    st.stop()
+                msg = "Task completed!"
+                if res:
+                    msg += f" Test mark: {res['got']}/{res['total']} ({res['pct']}%)."
+                with st.spinner("Updating your plan..."):
+                    follow_up = maybe_schedule_review(current_task)
+                if follow_up:
+                    msg += " " + follow_up
+                st.session_state.flash = msg
+                st.session_state.selected_task_id = None
+                st.rerun()
