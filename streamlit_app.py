@@ -432,21 +432,14 @@ def calculate_optimal_scheduled_date(target_exam_date):
 # 6. SIDEBAR: ACCOUNT & PERSONALISATION
 # ---------------------------------------------------------
 with st.sidebar:
-    st.header("👤 Account Sync")
-    if st.session_state.user:
-        st.success(f"Signed in as: **{st.session_state.user}**")
-        if st.button("Sign Out"):
-            st.session_state.user = None
+    st.header("👤 Account")
+    with st.container(border=True):
+        st.caption("Signed in as")
+        st.markdown(f"**{st.session_state.user['email']}**")
+        st.caption("✅ Progress is saved automatically")
+        if st.button("Sign out", use_container_width=True):
+            sign_out()
             st.rerun()
-    else:
-        with st.expander("Sign In / Register"):
-            email = st.text_input("Email", key="login_email")
-            pwd = st.text_input("Password", type="password", key="login_pwd")
-            if st.button("Sign In"):
-                if email:
-                    st.session_state.user = email
-                    st.success("Signed in! Progress synced.")
-                    st.rerun()
 
     st.divider()
     st.header("⚙️ Personalise Planner")
