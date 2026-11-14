@@ -188,9 +188,8 @@ def auth_screen():
     _, mid, _ = st.columns([1, 1.3, 1])
     with mid:
         st.markdown(
-            '<div class="hero" style="flex-direction:column;text-align:center;">'
-            '<div class="hero-title">⚡ Unstuck</div>'
-            '<div class="hero-sub">Adaptive revision planning that adjusts to how you\'re really doing.</div>'
+            '<div class="hero" style="justify-content:center;text-align:center;padding:48px 30px;">'
+            '<div class="hero-title" style="font-size:4rem;">⚡ Unstuck</div>'
             '</div>', unsafe_allow_html=True)
         tab_in, tab_up = st.tabs(["Sign in", "Create account"])
 
