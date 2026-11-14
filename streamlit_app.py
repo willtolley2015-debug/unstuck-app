@@ -302,98 +302,98 @@ if len(overdue_tasks) >= 3 and not st.session_state.recovery_triggered:
 # ---------------------------------------------------------
 # 4. AI TIME ESTIMATOR & CONTENT GENERATOR
 # ---------------------------------------------------------
-def fetch_ai_breakdown(topic, subject, board, level, spec_details=""):
-    """Generates specification-aligned content and dynamic completion time using OpenAI."""
-    
+def fetch_ai_breakdown(topic, subject, board, level, spec_details="", easier=False):
+    """Generates spec-aligned content: steps, flashcards and a MIXED question set (mcq / numeric / short)."""
+
     default_fallback = {
-        "est_minutes": 30,
+        "est_minutes": 20 if easier else 30,
         "steps": [
             f"Review official {board} {level} specification points for {topic} on Physics & Maths Tutor (PMT) or Save My Exams.",
             f"Watch Cognito or Freesciencelessons video breakdowns covering {topic}.",
             f"Complete 3 exam-style questions on PMT for {topic} and check using official mark schemes."
         ],
         "flashcards": [
-            {
-                "q": f"What is the key specification concept behind {topic} in {subject}?",
-                "a": f"In {board} {level} {subject}, {topic} requires applying standard definitions, maintaining unit consistency, and showing step-by-step working."
-            },
-            {
-                "q": f"Which core equation or principle applies to {topic}?",
-                "a": f"Recall the required spec formula for {topic}, ensuring standard SI units are used."
-            },
-            {
-                "q": f"Where do students commonly lose marks on {topic} exam questions?",
-                "a": "Forgetting unit conversions, misreading command words, or omitting intermediate calculation steps."
-            }
+            {"q": f"What is the key specification concept behind {topic} in {subject}?",
+             "a": f"In {board} {level} {subject}, {topic} requires applying standard definitions, maintaining unit consistency, and showing step-by-step working."},
+            {"q": f"Which core equation or principle applies to {topic}?",
+             "a": f"Recall the required spec formula for {topic}, ensuring standard SI units are used."},
+            {"q": f"Where do students commonly lose marks on {topic} exam questions?",
+             "a": "Forgetting unit conversions, misreading command words, or omitting intermediate calculation steps."}
         ],
         "test_questions": [
-            {
-                "q": f"What is the first step when solving multi-mark questions on {topic} for {board}?",
-                "options": ["Convert all given values to standard SI units", "Skip Intermediate Steps", "Ignore unit labels", "Round intermediate figures"],
-                "correct": 0
-            },
-            {
-                "q": f"Which revision site hosts official {board} exam questions by topic for {topic}?",
-                "options": ["Physics & Maths Tutor (PMT)", "Generic Wiki", "Unverified Blog", "Social Media"],
-                "correct": 0
-            },
-            {
-                "q": f"What do mark schemes for {subject} high-tariff questions require for full credit?",
-                "options": ["Clear working steps and correct unit symbols", "Answer only without working", "Rounded guesses", "Missing formulas"],
-                "correct": 0
-            },
-            {
-                "q": f"Why is consulting the {board} specification essential for {topic}?",
-                "options": ["To identify exact mandatory key terms and required practical steps", "To skip exam practice", "To memorize non-examinable details", "To guess grade boundaries"],
-                "correct": 0
-            },
-            {
-                "q": f"What check should be performed on calculation answers for {topic}?",
-                "options": ["Verify significant figures, units, and logical magnitude", "Erase calculations", "Leave blank", "Ignore required units"],
-                "correct": 0
-            }
+            {"type": "mcq", "marks": 1,
+             "q": f"What is the first step when solving multi-mark questions on {topic} for {board}?",
+             "options": ["Convert all given values to standard SI units", "Skip Intermediate Steps", "Ignore unit labels", "Round intermediate figures"],
+             "correct": 0},
+            {"type": "mcq", "marks": 1,
+             "q": f"Which revision site hosts official {board} exam questions by topic for {topic}?",
+             "options": ["Physics & Maths Tutor (PMT)", "Generic Wiki", "Unverified Blog", "Social Media"],
+             "correct": 0},
+            {"type": "mcq", "marks": 1,
+             "q": f"What do mark schemes for {subject} high-tariff questions require for full credit?",
+             "options": ["Clear working steps and correct unit symbols", "Answer only without working", "Rounded guesses", "Missing formulas"],
+             "correct": 0},
+            {"type": "short", "marks": 2,
+             "q": f"Explain how you would approach a multi-mark exam question on {topic}.",
+             "mark_scheme": ["Identifies the command word and what the question is asking",
+                             f"Applies the relevant {board} specification content for {topic} with clear working or reasoning"]},
+            {"type": "short", "marks": 2,
+             "q": f"Describe one common mistake students make on {topic} and how to avoid it.",
+             "mark_scheme": ["Identifies a realistic common error (e.g. missing units, misreading the command word)",
+                             "Explains a correct way to avoid it"]},
         ]
     }
-    
+    if easier:
+        default_fallback["mode"] = "confidence_builder"
+
     if not client:
         return default_fallback
-        
+
+    if subject == "Maths":
+        mix = "1 'mcq', 3 'numeric' (worked calculations, 2-3 marks each), 1 'short' (explain or justify a method, 2-3 marks)."
+    elif subject in ("Physics", "Chemistry"):
+        mix = "1 'mcq', 2 'numeric' (calculations, 2-3 marks each), 2 'short' (explain/describe, 2-4 marks each)."
+    else:
+        mix = "2 'mcq', 3 'short' (describe/explain/evaluate, 2-6 marks each). Use 'numeric' only if the topic naturally involves a calculation."
+
+    easier_note = ""
+    if easier:
+        easier_note = """
+    CONFIDENCE-BUILDER MODE: this student has been struggling. Make everything gentler:
+    - est_minutes between 15 and 25; steps small, concrete and encouraging.
+    - Flashcards in plain, simple wording.
+    - Questions at the easiest end of the specification; the first question should be very accessible; marks mostly 1-3.
+    - Mark schemes should reward partial understanding.
+    """
+
     prompt = f"""
     You are a senior UK chief examiner for {board} {level} {subject}.
     Analyze the topic '{topic}' and generate a specification-aligned study module.
     Specification Context / Notes: '{spec_details if spec_details else "Standard syllabus requirements"}'
-
+    {easier_note}
     ESTIMATED TIME RULES ('est_minutes'):
-    - Evaluate topic breadth, equation density, and cognitive load carefully. DO NOT default to 30 or 45.
-    - Quick definitions, single concepts, or basic terms = 15 to 20 minutes.
-    - Standard topics with multiple sub-concepts or single equations = 25 to 35 minutes.
-    - Heavy topics (multi-step calculations, synoptic themes, required practicals, extended essays) = 40 to 60 minutes.
+    - Quick definitions or single concepts = 15 to 20 minutes.
+    - Standard topics with several sub-concepts or one equation = 25 to 35 minutes.
+    - Heavy topics (multi-step calculations, required practicals, extended essays) = 40 to 60 minutes.
 
     CRITICAL REQUIREMENTS:
     1. Everything MUST strictly follow the official {board} {level} {subject} syllabus.
-    2. Flashcards must test exact definitions, formulas, or core mechanisms. Answers MUST be 100% complete, factual, and detailed.
-    3. Practice questions must mimic real {board} exam questions with realistic answer options.
+    2. Provide 6 flashcards testing exact definitions, formulas or core mechanisms. Answers must be complete and factual.
+    3. Provide exactly 5 practice questions mimicking real {board} exam questions with this mix: {mix}
+       If the topic has no calculations, use 'short' instead of 'numeric'.
+    4. For 'numeric' questions the "answer" must be a plain number only (no units or text). Double-check the arithmetic.
+    5. For 'short' questions give a mark_scheme with one clear point per mark (the number of points should equal "marks").
+    6. Vary which option index is correct for 'mcq' questions.
 
-    Return ONLY a valid JSON object:
+    Return ONLY a valid JSON object in exactly this shape:
     {{
-      "est_minutes": integer (calculated based on complexity rules above, between 15 and 60),
-      "steps": [
-        "Step 1 with specific resource (e.g. PMT, Cognito, Save My Exams, CGP, Seneca)",
-        "Step 2 focusing on active recall or formula practice",
-        "Step 3 focusing on past-paper questions and mark scheme checking"
-      ],
-      "flashcards": [
-        {{"q": "Question 1 about {topic}", "a": "Complete mark-scheme factual answer"}},
-        {{"q": "Question 2", "a": "Answer 2"}},
-        {{"q": "Question 3", "a": "Answer 3"}}
-      ],
+      "est_minutes": integer,
+      "steps": ["Step 1 with a specific resource", "Step 2 active recall or formula practice", "Step 3 past-paper questions and mark scheme checking"],
+      "flashcards": [{{"q": "...", "a": "..."}}],
       "test_questions": [
-        {{
-          "q": "Exam-style question for {topic}",
-          "options": ["Option A", "Option B", "Option C", "Option D"],
-          "correct": 0
-        }},
-        ... 4 more objects (5 total)
+        {{"type": "mcq", "q": "...", "options": ["A", "B", "C", "D"], "correct": 0, "marks": 1}},
+        {{"type": "numeric", "q": "...", "answer": 12.5, "unit": "N", "tolerance_pct": 1, "marks": 2, "working": "short worked solution"}},
+        {{"type": "short", "q": "...", "marks": 3, "mark_scheme": ["point 1", "point 2", "point 3"]}}
       ]
     }}
     """
@@ -404,7 +404,18 @@ def fetch_ai_breakdown(topic, subject, board, level, spec_details=""):
             response_format={"type": "json_object"},
             temperature=0.3
         )
-        return json.loads(res.choices[0].message.content)
+        data = json.loads(res.choices[0].message.content)
+        qs = [q for q in data.get("test_questions", []) if isinstance(q, dict) and q.get("q")]
+        if not qs or not data.get("steps") or not data.get("flashcards"):
+            return default_fallback
+        data["test_questions"] = qs
+        try:
+            data["est_minutes"] = max(15, min(60, int(data.get("est_minutes", 30))))
+        except (TypeError, ValueError):
+            data["est_minutes"] = 30
+        if easier:
+            data["mode"] = "confidence_builder"
+        return data
     except Exception as e:
         st.error(f"⚠️ OpenAI API Error: {str(e)}")
         return default_fallback
