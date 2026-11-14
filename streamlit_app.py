@@ -691,7 +691,7 @@ with st.sidebar:
         if st.button("Sign out", use_container_width=True):
             sign_out()
             st.rerun()
-
+    
     st.divider()
     st.header("⚙️ Personalise Planner")
     
@@ -825,6 +825,27 @@ with st.container(border=True):
                     coverage_pct, 
                     text=f"Coverage: {int(coverage_pct * 100)}% | Mastery Score: {mastery_pct}%"
                 )
+
+_weak = weakest_topics()
+if _weak:
+    with st.container(border=True):
+        st.markdown("### 🎯 Focus on this")
+        st.caption("Your weakest topics right now, based on confidence ratings and test marks.")
+        for _t in _weak:
+            fc1, fc2 = st.columns([4, 1.3])
+            with fc1:
+                st.markdown(f"**{_t.get('topic')}**")
+                _p = pill(_t.get("subject"), "blue") + conf_pill(_t.get("confidence", 3))
+                if _t.get("quiz_score") is not None:
+                    _p += pill(f"Test {_t['quiz_score']}%", "red" if _t["quiz_score"] <= 40 else "green")
+                st.markdown(_p, unsafe_allow_html=True)
+            with fc2:
+                if _t.get("status") != "Completed":
+                    if st.button("🚀 Unstuck", key=f"focus_open_{_t.get('id')}", use_container_width=True):
+                        st.session_state.selected_task_id = _t.get("id")
+                        st.rerun()
+                else:
+                    st.caption("Review coming up")
 
 st.divider()
 
