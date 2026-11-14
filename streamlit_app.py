@@ -704,14 +704,17 @@ with st.sidebar:
     st.subheader("Subjects & Exam Boards")
     available_subjects = ["Chemistry", "Physics", "Maths", "Biology", "English Literature", "History", "Computer Science"]
     
-    selected_subs = st.multiselect(
-        "Select Your Subjects:",
-        options=available_subjects,
-        default=st.session_state.user_settings.get("selected_subjects", ["Chemistry", "Physics", "Maths"])
-    )
+    saved_subs = st.session_state.user_settings.get("selected_subjects", ["Chemistry", "Physics", "Maths"])
+    with st.expander("📚 Choose your subjects"):
+        selected_subs = [
+            s for s in available_subjects
+            if st.checkbox(s, value=(s in saved_subs), key=f"sub_chk_{s}")
+        ]
     if not selected_subs:
-        selected_subs = ["Chemistry"]
+        st.warning("Pick at least one subject.")
+        selected_subs = saved_subs
     st.session_state.user_settings["selected_subjects"] = selected_subs
+    st.caption("Selected: " + ", ".join(selected_subs))
     
     boards = ["AQA", "OCR A", "OCR B", "Edexcel", "WJEC", "Eduqas", "CIE"]
     st.caption("Select Exam Board for each subject:")
