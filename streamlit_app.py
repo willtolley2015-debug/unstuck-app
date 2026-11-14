@@ -914,7 +914,7 @@ with col_schedule:
     
     for i, day in enumerate(days):
         with tabs[i]:
-            day_tasks = [t for t in st.session_state.tasks if t.get("exam_date") == day]
+           day_tasks = sorted([t for t in st.session_state.tasks if t.get("exam_date") == day], key=task_sort_key)
             
             if not day_tasks:
                 st.caption("✨ No tasks scheduled for this date. Use 'Add Task to Schedule' above.")
@@ -939,7 +939,11 @@ with col_schedule:
                                 + conf_pill(task.get("confidence", 3))
                             )
                             if task.get("quiz_score") is not None:
-                                pills += pill(f"Test {task['quiz_score']}/5", "green")
+                                pills += pill(f"Test {task['quiz_score']}%", "green")
+                            if needs_attention(task):
+                                pills += pill("⚠️ Needs attention", "red")
+                            if (task.get("ai_content") or {}).get("mode") == "confidence_builder":
+                                pills += pill("🌱 Confidence builder", "green")
                             st.markdown(pills, unsafe_allow_html=True)
                         with c2:
                             if not is_completed:
