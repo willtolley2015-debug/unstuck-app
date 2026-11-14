@@ -747,6 +747,31 @@ if not client:
 
 if st.session_state.recovery_triggered:
     st.info("ℹ️ **Recovery Mode Activated:** You had 3 or more overdue tasks. Workload times have been scaled back by 30% and schedule adjusted automatically.")
+    
+if st.session_state.get("flash"):
+    st.success(st.session_state.pop("flash"))
+
+with st.expander("ℹ️ How Unstuck works", expanded=(len(st.session_state.tasks) == 0)):
+    st.markdown("""
+**1. Set up (sidebar).** Choose your level, tick **every subject you take**, and pick the exam board for each one.
+
+**2. Add every upcoming test.** For each topic you need to revise, open **➕ Add Task to Schedule** and enter the subject, topic, specification points (optional, but it makes the content more accurate), the **exam date** and your honest confidence (1-5). The more topics and exam dates you add, the better your timetable: Unstuck spreads topics across the days before each exam and balances the daily workload.
+
+**3. Study.** Open a day's tab and press **🚀 Unstuck** on a task.
+- **📚 Learn:** three small steps plus flip-style flashcards (click to flip, arrows to move on).
+- **📝 Practice:** a mix of multiple choice, calculations and written questions. Calculations are checked automatically; written answers are marked by AI against the mark scheme, one mark per point.
+
+**4. Finish.** Rate your confidence after the session and press **Complete Task**.
+
+**5. It adapts to you.**
+- Weak topics are sorted to the top of each day (⚠️ *Needs attention*).
+- A low test mark (40% or less) or low confidence (2 or less) schedules a **gentler review task** a few days later.
+- After a bad result, your next task in that subject is generated in **🌱 confidence-builder mode** (easier, shorter).
+- **🎯 Focus on this** lists your weakest topics on the home screen.
+- If 3 or more tasks go overdue, **Recovery Mode** shrinks your workload.
+
+*Be honest with your confidence ratings: they steer the plan. AI marking is a study guide, not an official mark.*
+""")
 
 # ---------------------------------------------------------
 # 8. PROGRESS TRACKER & SUBJECT MASTERY
