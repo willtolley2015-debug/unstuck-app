@@ -655,10 +655,16 @@ with col_workspace:
     if not current_task:
         st.info("👈 Select a date tab on the schedule and click **'🚀 Unstuck'** on any task to open its revision plan.")
     else:
-        st.markdown(f"### Working on: **{current_task.get('topic')}**")
-        st.caption(f"**Subject:** {current_task.get('subject')} ({current_task.get('exam_board')}) | **Est. Time:** {current_task.get('est_minutes')} mins | **Level:** {st.session_state.user_settings['level']}")
-        if current_task.get("spec_details"):
-            st.caption(f"**Spec Focus:** {current_task.get('spec_details')}")
+        with st.container(border=True):
+            st.markdown(f"### 🎯 {current_task.get('topic')}")
+            st.markdown(
+                pill(f"{current_task.get('subject')} · {current_task.get('exam_board')}", "blue")
+                + pill(f"⏱ {current_task.get('est_minutes')} min", "grey")
+                + pill(st.session_state.user_settings['level'], "grey")
+                + conf_pill(current_task.get("confidence", 3)),
+                unsafe_allow_html=True)
+            if current_task.get("spec_details"):
+                st.caption(f"**Spec focus:** {current_task.get('spec_details')}")
         
         # Load or lazily initialize frozen AI content stored in session state
         if "ai_content" not in current_task or not current_task["ai_content"]:
